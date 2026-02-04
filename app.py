@@ -7,12 +7,7 @@ import getpass
 
 app = Flask(__name__)
 
-# Path to the existing PNG directory (ensure consistency)
-PNG_DIR = os.path.abspath(os.path.join(os.getcwd(), 'GEFS_GFS_OUTPUT', 'pngs'))
-
-# Ensure the directory exists
-if not os.path.exists(PNG_DIR):
-    raise FileNotFoundError(f"The PNG directory does not exist: {PNG_DIR}")
+PNG_DIR = os.path.join(os.getcwd(), "GEFS_GFS_OUTPUT", "pngs")
 
 @app.route('/')
 def index():
