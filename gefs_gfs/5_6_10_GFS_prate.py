@@ -12,6 +12,7 @@ import time
 import gc
 from scipy.ndimage import zoom
 from datetime import datetime, timedelta
+import pytz  # Add this import for timezone handling
 
 # -----------------------------
 # DIRECTORIES
@@ -35,25 +36,59 @@ for file in os.listdir(avg_png_dir):
         print(f"Failed to delete {file_path}: {e}")
 
 # -----------------------------
-# FIND MOST RECENT RUN
+# DETERMINE RUN HOUR BASED ON CURRENT TIME (EST)
 # -----------------------------
-def find_most_recent_run():
-    now = datetime.utcnow()
-    run_hours = ["18", "12", "06", "00"]  # Possible run hours in descending order
-    while True:
-        for run_hour in run_hours:
-            run_date = now.strftime("%Y%m%d")
-            test_url = (
-                f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.{run_date}/{run_hour}/"
-            )
-            response = requests.head(test_url)
-            if response.status_code == 200:
-                print(f"Found most recent run: {run_date} {run_hour}Z")
-                return run_date, run_hour
-        now -= timedelta(days=1)  # Go back one day if no valid run is found
+def determine_run_hour():
+    # Convert current UTC time to EST
+    utc_now = datetime.utcnow()
+    est_now = utc_now - timedelta(hours=5)  # Adjust UTC to EST (standard time)
+    
+    # If daylight saving time is active, adjust EST offset
+    if est_now.month in [3, 4, 5, 6, 7, 8, 9, 10, 11]:  # Approximate DST months
+        est_now = utc_now - timedelta(hours=4)
 
-# Get the most recent run date and hour
-run_date, run_hour = find_most_recent_run()
+    hour = est_now.hour
+
+    # Determine the run hour based on EST time
+    if hour >= 23:  # 11 PM EST or later
+        return "00"
+    elif hour >= 17:  # 5 PM EST or later
+        return "18"
+    elif hour >= 11:  # 11 AM EST or later
+        return "12"
+    elif hour >= 5:  # 5 AM EST or later
+        return "06"
+    else:
+        return "18"  # Default to the previous day's 18Z run if before 5 AM EST
+
+# -----------------------------
+# FIND MOST RECENT RUN WITH VALID DATA
+# -----------------------------
+def find_valid_run():
+    now = datetime.utcnow()
+    run_hour = determine_run_hour()  # Determine the initial run hour
+    while True:
+        run_date = now.strftime("%Y%m%d")
+        test_url = (
+            f"https://nomads.ncep.noaa.gov/pub/data/nccf/com/gfs/prod/gfs.{run_date}/{run_hour}/"
+        )
+        response = requests.head(test_url)
+        if response.status_code == 200:
+            print(f"Found valid run: {run_date} {run_hour}Z")
+            return run_date, run_hour
+        # Go back to the previous run
+        if run_hour == "18":
+            run_hour = "12"
+        elif run_hour == "12":
+            run_hour = "06"
+        elif run_hour == "06":
+            run_hour = "00"
+        elif run_hour == "00":
+            run_hour = "18"
+            now -= timedelta(days=1)  # Go back one day if all runs for the day fail
+
+# Get the most recent valid run date and hour before starting downloads
+run_date, run_hour = find_valid_run()
 
 # -----------------------------
 # FORECAST SETTINGS
@@ -88,30 +123,35 @@ for step in forecast_steps:
     gefs_data_list = []
 
     # ---- GFS ----
-    gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
-    gfs_path = os.path.join(BASE_DIR_AVG, "grib_files", gfs_file)
-    gfs_url = (
-        f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
-        f"&var_PRATE=on&lev_surface=on"
-        f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
-        f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
-    )
+    while True:  # Retry logic for unavailable forecast hours
+        gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
+        gfs_path = os.path.join(BASE_DIR_AVG, "grib_files", gfs_file)
+        gfs_url = (
+            f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
+            f"&var_PRATE=on&lev_surface=on"
+            f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
+            f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
+        )
 
-    # Download only if not exist
-    if not os.path.exists(gfs_path):
-        print(f"Downloading GFS FH{step_str} …")
-        r = requests.get(gfs_url, stream=True)
-        if r.status_code == 200:
-            with open(gfs_path, 'wb') as f:
-                for chunk in r.iter_content(1024*64):
-                    if chunk:
-                        f.write(chunk)
-            print(f"Saved GFS GRIB: {gfs_path}")
+        # Download only if not exist
+        if not os.path.exists(gfs_path):
+            print(f"Downloading GFS FH{step_str} …")
+            r = requests.get(gfs_url, stream=True)
+            if r.status_code == 200:
+                with open(gfs_path, 'wb') as f:
+                    for chunk in r.iter_content(1024*64):
+                        if chunk:
+                            f.write(chunk)
+                print(f"Saved GFS GRIB: {gfs_path}")
+                break  # Exit the retry loop if download is successful
+            else:
+                print(f"Failed to download GFS {gfs_file}, status code: {r.status_code}")
+                # Retry with the previous run if download fails
+                run_date, run_hour = find_valid_run()
+                continue
         else:
-            print(f"Failed to download GFS {gfs_file}, status code: {r.status_code}")
-            continue
-    else:
-        print(f"GFS FH{step_str} already exists, skipping download.")
+            print(f"GFS FH{step_str} already exists, skipping download.")
+            break
 
     # Open GFS
     try:
@@ -128,30 +168,35 @@ for step in forecast_steps:
 
     # ---- GEFS MEMBERS ----
     for member in gefs_members:
-        gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
-        gefs_path = os.path.join(BASE_DIR_AVG, "grib_files", gefs_file)
-        gefs_url = (
-            f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
-            f"&var_PRATE=on&lev_surface=on"
-            f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
-            f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
-        )
+        while True:  # Retry logic for unavailable GEFS members
+            gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
+            gefs_path = os.path.join(BASE_DIR_AVG, "grib_files", gefs_file)
+            gefs_url = (
+                f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
+                f"&var_PRATE=on&lev_surface=on"
+                f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
+                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
+            )
 
-        # Download only if not exist
-        if not os.path.exists(gefs_path):
-            print(f"Downloading GEFS member {member}, FH{step_str} …")
-            r = requests.get(gefs_url, stream=True)
-            if r.status_code == 200:
-                with open(gefs_path, 'wb') as f:
-                    for chunk in r.iter_content(1024*64):
-                        if chunk:
-                            f.write(chunk)
-                print(f"Saved GEFS GRIB: {gefs_path}")
+            # Download only if not exist
+            if not os.path.exists(gefs_path):
+                print(f"Downloading GEFS member {member}, FH{step_str} …")
+                r = requests.get(gefs_url, stream=True)
+                if r.status_code == 200:
+                    with open(gefs_path, 'wb') as f:
+                        for chunk in r.iter_content(1024*64):
+                            if chunk:
+                                f.write(chunk)
+                    print(f"Saved GEFS GRIB: {gefs_path}")
+                    break  # Exit the retry loop if download is successful
+                else:
+                    print(f"Failed to download GEFS {gefs_file}, status code: {r.status_code}")
+                    # Retry with the previous run if download fails
+                    run_date, run_hour = find_valid_run()
+                    continue
             else:
-                print(f"Failed to download GEFS {gefs_file}, status code: {r.status_code}")
-                continue
-        else:
-            print(f"GEFS member {member} FH{step_str} already exists, skipping download.")
+                print(f"GEFS member {member} FH{step_str} already exists, skipping download.")
+                break
 
         # Open GEFS
         try:
