@@ -7,11 +7,12 @@ import getpass
 
 app = Flask(__name__)
 
-# Path to the PNG directory in the new root directory
-PNG_DIR = os.path.join(os.getcwd(), 'gefs_gfs', 'GEFS_GFS_OUTPUT', 'pngs')
+# Path to the existing PNG directory
+PNG_DIR = os.path.join(os.getcwd(), 'GEFS_GFS_OUTPUT', 'pngs')
 
 # Ensure the directory exists
-os.makedirs(PNG_DIR, exist_ok=True)
+if not os.path.exists(PNG_DIR):
+    raise FileNotFoundError(f"The PNG directory does not exist: {PNG_DIR}")
 
 @app.route('/')
 def index():
@@ -21,7 +22,7 @@ def index():
 
 @app.route('/pngs/<filename>')
 def serve_png(filename):
-    # Serve PNG files directly from the new directory
+    # Serve PNG files directly from the existing directory
     return send_from_directory(PNG_DIR, filename)
 
 @app.route("/run-task1")
