@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ADKwx</title>
+    <style>
+        body {
+            margin: 0;
+            font-family: Arial, sans-serif;
+        }
+        header {
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
+            font-size: 24px;
+        }
+        .container {
+            display: flex;
+            height: 100vh;
+        }
+        .sidebar {
+            width: 200px;
+            background-color: #f4f4f4;
+            padding: 15px;
+            box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+        }
+        .main {
+            flex: 1;
+            padding: 15px;
+            overflow-y: auto;
+        }
+        .slider-container {
+            position: relative;
+            max-width: 1000px; /* Adjust the container width */
+            margin: 0 auto;
+        }
+        .slider-container img {
+            width: 100%; /* Make the image take up the full container width */
+            height: auto;
+            display: none;
+        }
+        .slider-container img.active {
+            display: block;
+        }
+        .slider-controls {
+            text-align: center;
+            margin-top: 10px;
+        }
+        .slider-bar {
+            width: 100%;
+            margin: 20px 0;
+        }
+    </style>
+</head>
+<body>
+    <header>ADKwx</header>
+    <div class="container">
+        <div class="sidebar">
+            <h3>Menu</h3>
+            <!-- Removed all buttons/links from the sidebar -->
+        </div>
+        <div class="main">
+            <h2>Forecast Images</h2>
+            <div class="slider-container">
+                <!-- Slider images -->
+                {% for image in images %}
+                <img src="{{ url_for('serve_png', filename=image) }}" alt="Forecast Image" class="{% if loop.first %}active{% endif %}">
+                {% endfor %}
+            </div>
+            <div class="slider-controls">
+                <input type="range" class="slider-bar" min="0" max="{{ images|length - 1 }}" value="0" id="sliderBar">
+            </div>
+        </div>
+    </div>
+    <script>
+        const slides = document.querySelectorAll('.slider-container img');
+        const sliderBar = document.getElementById('sliderBar');
+
+        // Show the slide corresponding to the slider value
+        function showSlide(index) {
+            slides.forEach((slide, i) => {
+                slide.classList.toggle('active', i === index);
+            });
+        }
+
+        // Update the slide when the slider value changes
+        sliderBar.addEventListener('input', (event) => {
+            showSlide(parseInt(event.target.value, 10));
+        });
+
+        // Initialize the first slide
+        showSlide(0);
+    </script>
+</body>
+</html>
