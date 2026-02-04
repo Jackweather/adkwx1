@@ -7,8 +7,8 @@ import getpass
 
 app = Flask(__name__)
 
-# Path to the PNG directory (current location)
-PNG_DIR = os.path.join(os.getcwd(), 'GEFS_GFS_OUTPUT', 'pngs')
+# Path to the PNG directory in the new root directory
+PNG_DIR = os.path.join(os.getcwd(), 'gefs_gfs', 'GEFS_GFS_OUTPUT', 'pngs')
 
 # Ensure the directory exists
 os.makedirs(PNG_DIR, exist_ok=True)
@@ -21,7 +21,7 @@ def index():
 
 @app.route('/pngs/<filename>')
 def serve_png(filename):
-    # Serve PNG files directly from the current directory
+    # Serve PNG files directly from the new directory
     return send_from_directory(PNG_DIR, filename)
 
 @app.route("/run-task1")
@@ -29,7 +29,7 @@ def run_task1():
     def run_all_scripts():
         print("Flask is running as user:", getpass.getuser())  # Print user for debugging
         scripts = [
-            (os.path.join(os.getcwd(), "gefs_gfs", "mslp_prate.py"), os.path.join(os.getcwd(), "gefs_gfs")),
+            ("/opt/render/project/src/gefs_gfs/5_6_10_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ]
         for script, cwd in scripts:
             try:
