@@ -14,12 +14,11 @@ from scipy.ndimage import zoom
 from datetime import datetime, timedelta
 import pytz  # Add this import for timezone handling
 
-# -----------------------------
-# DIRECTORIES
-# -----------------------------
-BASE_DIR_AVG = 'gefs_gfs/GEFS_GFS_OUTPUT/static'
 
-# Ensure the directory structure exists
+current_dir = os.path.dirname(os.path.abspath(__file__))
+BASE_DIR_AVG = os.path.join(current_dir, '5_6_10_GFS_OUTPUT')
+
+# Make sure AVG subfolders exist
 for sub in ['grib', 'png']:
     os.makedirs(os.path.join(BASE_DIR_AVG, sub), exist_ok=True)
 
