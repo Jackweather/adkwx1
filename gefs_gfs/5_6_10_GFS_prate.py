@@ -17,16 +17,16 @@ import pytz  # Add this import for timezone handling
 # -----------------------------
 # DIRECTORIES
 # -----------------------------
-BASE_DIR_AVG = 'GEFS_GFS_OUTPUT'
+BASE_DIR_AVG = 'GEFS_GFS_OUTPUT/static'
 
 # Make sure AVG subfolders exist
-for sub in ['grib_files', 'pngs']:
+for sub in ['grib', 'png']:
     os.makedirs(os.path.join(BASE_DIR_AVG, sub), exist_ok=True)
 
 # -----------------------------
 # CLEAR ONLY AVG PNGs
 # -----------------------------
-avg_png_dir = os.path.join(BASE_DIR_AVG, "pngs")
+avg_png_dir = os.path.join(BASE_DIR_AVG, "png")
 for file in os.listdir(avg_png_dir):
     file_path = os.path.join(avg_png_dir, file)
     try:
@@ -125,7 +125,7 @@ for step in forecast_steps:
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
         gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
-        gfs_path = os.path.join(BASE_DIR_AVG, "grib_files", gfs_file)
+        gfs_path = os.path.join(BASE_DIR_AVG, "grib", gfs_file)
         gfs_url = (
             f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
             f"&var_PRATE=on&lev_surface=on"
@@ -170,7 +170,7 @@ for step in forecast_steps:
     for member in gefs_members:
         while True:  # Retry logic for unavailable GEFS members
             gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
-            gefs_path = os.path.join(BASE_DIR_AVG, "grib_files", gefs_file)
+            gefs_path = os.path.join(BASE_DIR_AVG, "grib", gefs_file)
             gefs_url = (
                 f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
                 f"&var_PRATE=on&lev_surface=on"
@@ -257,7 +257,7 @@ for step in forecast_steps:
         fontweight='bold'
     )
 
-    png_path = os.path.join(BASE_DIR_AVG, "pngs", f"avg_prate_all_{step_str}.png")
+    png_path = os.path.join(BASE_DIR_AVG, "png", f"avg_prate_all_{step_str}.png")
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
