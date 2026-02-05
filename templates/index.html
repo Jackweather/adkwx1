@@ -52,6 +52,29 @@
             width: 100%;
             margin: 20px 0;
         }
+        @media (max-width: 768px) {
+            body {
+                font-size: 14px; /* Adjust font size for smaller screens */
+            }
+            .container {
+                flex-direction: column; /* Stack sidebar and main content vertically */
+                height: auto; /* Allow content to adjust height */
+            }
+            .sidebar {
+                width: 100%; /* Make sidebar full width */
+                box-shadow: none; /* Remove shadow for simplicity */
+                padding: 10px; /* Adjust padding */
+            }
+            .main {
+                padding: 10px; /* Adjust padding */
+            }
+            .slider-container {
+                max-width: 100%; /* Ensure slider fits within the screen */
+            }
+            .slider-bar {
+                width: 90%; /* Reduce slider width for smaller screens */
+            }
+        }
     </style>
 </head>
 <body>
