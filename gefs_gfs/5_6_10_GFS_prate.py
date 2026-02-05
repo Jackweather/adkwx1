@@ -17,7 +17,7 @@ import pytz  # Add this import for timezone handling
 # -----------------------------
 # DIRECTORIES
 # -----------------------------
-BASE_DIR_AVG = 'GEFS_GFS_OUTPUT/static'
+BASE_DIR_AVG = 'gefs_gfs/GEFS_GFS_OUTPUT/static'
 
 # Make sure AVG subfolders exist
 for sub in ['grib', 'png']:
