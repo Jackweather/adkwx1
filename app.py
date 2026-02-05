@@ -7,11 +7,11 @@ import getpass
 
 app = Flask(__name__)
 
-PNG_DIR = os.path.join(os.getcwd(), "gefs_gfs", "GEFS_GFS_OUTPUT", "static", "png")
+PNG_DIR = os.path.join(os.getcwd(), "GEFS_GFS_OUTPUT", "static", "png")
 
 @app.route('/')
 def index():
-    # Get a sorted list of PNG files in the directory
+    print(f"PNG_DIR: {PNG_DIR}")  # Debugging: Print the directory path
     images = sorted([file for file in os.listdir(PNG_DIR) if file.endswith('.png')])
     return render_template('index.html', images=images)
 
