@@ -61,6 +61,16 @@ def determine_run_hour():
         return "18"  # Default to the previous day's 18Z run if before 5 AM EST
 
 # -----------------------------
+# HELPER FUNCTION TO FORMAT LOCAL TIME
+# -----------------------------
+def format_local_time(run_hour, forecast_hour):
+    # Convert run hour to EST local time
+    run_hour_to_local = {"00": "7 PM", "06": "1 AM", "12": "1 PM", "18": "7 PM"}
+    base_time = datetime.strptime(run_hour, "%H") + timedelta(hours=forecast_hour)
+    local_time = base_time.strftime("%I %p").lstrip("0")  # Format as 12-hour clock
+    return run_hour_to_local.get(run_hour, "Unknown"), local_time
+
+# -----------------------------
 # FIND MOST RECENT RUN WITH VALID DATA
 # -----------------------------
 def find_valid_run():
@@ -118,7 +128,7 @@ gefs_members = ["05", "06", "10"]  # members to include
 # -----------------------------
 for step in forecast_steps:
     step_str = f"{step:03d}"
-
+    forecast_hour = step  # Forecast hour in hours
     gefs_data_list = []
 
     # ---- GFS ----
@@ -250,13 +260,16 @@ for step in forecast_steps:
     cbar.ax.tick_params(labelsize=7)
 
     # Include run information in the title
+    run_local_time, forecast_local_time = format_local_time(run_hour, forecast_hour)
+    current_day = datetime.now().strftime("%A")
     plt.title(
-        f"Average GFS + GEFS5 + GEFS6 + GEFS10 PRATE FH {step_str}\nRun: {run_date} {run_hour}Z",
+        f"PRATE (GFS + GEFS Members)\n"
+        f"Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {current_day})",
         fontsize=12,
         fontweight='bold'
     )
 
-    png_path = os.path.join(BASE_DIR_AVG, "png", f"avg_prate_all_{step_str}.png")
+    png_path = os.path.join(BASE_DIR_AVG, "png", f"5_6_10_prate_avg_{step_str}.png")
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
