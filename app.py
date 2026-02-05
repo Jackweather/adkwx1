@@ -7,7 +7,7 @@ import getpass
 
 app = Flask(__name__)
 
-PNG_DIR = os.path.join(os.getcwd(), "GEFS_GFS_OUTPUT", "static", "png")
+PNG_DIR = os.path.join(os.getcwd(), "gefs_gfs", "GEFS_GFS_OUTPUT", "static", "png")
 
 @app.route('/')
 def index():
