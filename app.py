@@ -1,24 +1,68 @@
-from flask import Flask, render_template, send_from_directory
+from flask import Flask, render_template, send_from_directory, abort
 import os
 import subprocess
 import threading
 import traceback
 import getpass
+import re
 
 app = Flask(__name__)
 
-PNG_DIR = os.path.join(os.getcwd(), "gefs_gfs", "5_6_10_GFS_OUTPUT", "png")
+# Replace single PNG_DIR with a mapping for both outputs
+PNG_DIRS = {
+    "5_6_10": os.path.join(os.getcwd(), "gefs_gfs", "5_6_10_GFS_OUTPUT", "png"),
+    "4_8_15": os.path.join(os.getcwd(), "gefs_gfs", "4_8_15_GFS_OUTPUT", "png"),
+}
 
 @app.route('/')
 def index():
-    print(f"PNG_DIR: {PNG_DIR}")  # Debugging: Print the directory path
-    images = sorted([file for file in os.listdir(PNG_DIR) if file.endswith('.png')])
-    return render_template('index.html', images=images)
+    # build per-group filename map keyed by 3-digit forecast index (e.g. "006")
+    group_files = {}
+    for group, path in PNG_DIRS.items():
+        group_files[group] = {}
+        if os.path.isdir(path):
+            for f in sorted([x for x in os.listdir(path) if x.endswith('.png')]):
+                m = re.search(r'_(\d{3})\.png$', f)
+                if m:
+                    key = m.group(1)
+                    group_files[group][key] = f
+                else:
+                    # fall back to numeric ordering if no index found
+                    idx = f"idx_{len(group_files[group])}"
+                    group_files[group][idx] = f
 
-@app.route('/pngs/<filename>')
-def serve_png(filename):
-    # Serve PNG files directly from the existing directory
-    return send_from_directory(PNG_DIR, filename)
+    # determine ordered union of indices (prefer numeric 3-digit keys)
+    all_keys = set()
+    for gmap in group_files.values():
+        all_keys.update(gmap.keys())
+
+    # try to sort numeric 3-digit keys first, then non-numeric
+    def key_sort(k):
+        return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
+    ordered_keys = sorted(all_keys, key=key_sort)
+
+    # create slides pairing left/right (use groups order from PNG_DIRS)
+    groups = list(PNG_DIRS.keys())
+    left_group = groups[0] if len(groups) > 0 else None
+    right_group = groups[1] if len(groups) > 1 else None
+
+    slides = []
+    for k in ordered_keys:
+        slide = {
+            "index": k,
+            "left": group_files.get(left_group, {}).get(k) if left_group else None,
+            "right": group_files.get(right_group, {}).get(k) if right_group else None
+        }
+        slides.append(slide)
+
+    return render_template('index.html', slides=slides, left_group=left_group, right_group=right_group)
+
+@app.route('/pngs/<group>/<filename>')
+def serve_png(group, filename):
+    dir_path = PNG_DIRS.get(group)
+    if not dir_path or not os.path.isdir(dir_path):
+        abort(404)
+    return send_from_directory(dir_path, filename)
 
 @app.route("/run-task1")
 def run_task1():
@@ -26,6 +70,7 @@ def run_task1():
         print("Flask is running as user:", getpass.getuser())  # Print user for debugging
         scripts = [
             ("/opt/render/project/src/gefs_gfs/5_6_10_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+            ("/opt/render/project/src/gefs_gfs/4_8_15_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ]
         for script, cwd in scripts:
             try:
