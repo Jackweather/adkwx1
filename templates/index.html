@@ -15,26 +15,36 @@
             padding: 10px;
             text-align: center;
             font-size: 24px;
+            height: 60px;
+            box-sizing: border-box;
         }
         .container {
             display: flex;
-            height: 100vh;
+            height: calc(100vh - 60px); /* fill viewport minus header */
         }
         .sidebar {
-            width: 200px;
+            width: 220px;
+            min-width: 160px;
             background-color: #f4f4f4;
             padding: 15px;
             box-shadow: 2px 0 5px rgba(0, 0, 0, 0.1);
+            overflow: auto;
         }
         .main {
             flex: 1;
-            padding: 15px;
-            overflow-y: auto;
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
         }
         .slider-container {
             position: relative;
-            max-width: 1000px; /* Adjust the container width */
-            margin: 0 auto;
+            width: 100%;
+            flex: 1; /* allow slider area to grow to available height */
+            display: flex;
+            align-items: stretch;
+            justify-content: center;
+            gap: 12px;
         }
         .slider-container img {
             width: 100%; /* Make the image take up the full container width */
@@ -46,19 +56,20 @@
         }
         .slider-controls {
             text-align: center;
-            margin-top: 10px;
+            padding: 10px 0;
+            background: transparent;
         }
         .slider-bar {
-            width: 100%;
-            margin: 20px 0;
+            width: 80%;
+            max-width: 1200px;
         }
-        @media (max-width: 768px) {
-            body {
-                font-size: 14px; /* Adjust font size for smaller screens */
-            }
+        @media (max-width: 900px) {
             .container {
                 flex-direction: column; /* Stack sidebar and main content vertically */
                 height: auto; /* Allow content to adjust height */
+            }
+            header {
+                height: auto;
             }
             .sidebar {
                 width: 100%; /* Make sidebar full width */
@@ -66,15 +77,24 @@
                 padding: 10px; /* Adjust padding */
             }
             .main {
-                padding: 10px; /* Adjust padding */
+                padding: 8px; /* Adjust padding */
             }
-            .slider-container {
-                max-width: 100%; /* Ensure slider fits within the screen */
+            .slide {
+                flex-direction: column; /* Stack panels vertically */
+            }
+            .panel {
+                min-height: 220px; /* Ensure panels have enough height */
             }
             .slider-bar {
-                width: 90%; /* Reduce slider width for smaller screens */
+                width: 95%; /* Reduce slider width for smaller screens */
             }
         }
+        /* add minimal layout for paired panels */
+        .slide { display:none; width:100%; gap:10px; }
+        .slide.active { display:flex; align-items:flex-start; }
+        .panel { flex:1; background:#fff; display:flex; align-items:center; justify-content:center; min-height:300px; }
+        .panel img { width:100%; height:auto; display:block; }
+        .empty { color:#666; font-size:14px; padding:20px; text-align:center; }
     </style>
 </head>
 <body>
@@ -87,33 +107,46 @@
         <div class="main">
             <h2>Forecast Images</h2>
             <div class="slider-container">
-                <!-- Slider images -->
-                {% for image in images %}
-                <img src="{{ url_for('serve_png', filename=image) }}" alt="Forecast Image" class="{% if loop.first %}active{% endif %}">
+                <!-- paired slides: left + right -->
+                {% for slide in slides %}
+                <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ loop.index0 }}">
+                    <div class="panel left-panel">
+                        {% if slide.left %}
+                        <img src="{{ url_for('serve_png', group=left_group, filename=slide.left) }}" alt="Left Forecast">
+                        {% else %}
+                        <div class="empty">No left image for {{ slide.index }}</div>
+                        {% endif %}
+                    </div>
+                    <div class="panel right-panel">
+                        {% if slide.right %}
+                        <img src="{{ url_for('serve_png', group=right_group, filename=slide.right) }}" alt="Right Forecast">
+                        {% else %}
+                        <div class="empty">No right image for {{ slide.index }}</div>
+                        {% endif %}
+                    </div>
+                </div>
                 {% endfor %}
             </div>
             <div class="slider-controls">
-                <input type="range" class="slider-bar" min="0" max="{{ images|length - 1 }}" value="0" id="sliderBar">
+                <input type="range" class="slider-bar" min="0" max="{{ slides|length - 1 }}" value="0" id="sliderBar">
             </div>
         </div>
     </div>
     <script>
-        const slides = document.querySelectorAll('.slider-container img');
+        const slides = document.querySelectorAll('.slide');
         const sliderBar = document.getElementById('sliderBar');
 
-        // Show the slide corresponding to the slider value
         function showSlide(index) {
             slides.forEach((slide, i) => {
                 slide.classList.toggle('active', i === index);
             });
         }
 
-        // Update the slide when the slider value changes
         sliderBar.addEventListener('input', (event) => {
             showSlide(parseInt(event.target.value, 10));
         });
 
-        // Initialize the first slide
+        // initialize
         showSlide(0);
     </script>
 </body>
