@@ -199,6 +199,7 @@ for step in forecast_steps:
                         if chunk:
                             f.write(chunk)
                 print(f"Saved GFS GRIB: {gfs_path}")
+                time.sleep(2)
             else:
                 print(f"Failed to download GFS {gfs_file}, status code: {r.status_code}")
                 run_date, run_hour = find_valid_run()
@@ -214,6 +215,7 @@ for step in forecast_steps:
                         if chunk:
                             f.write(chunk)
                 print(f"Saved GFS GRIB: {gfs_mslp_path}")
+                time.sleep(2)
             else:
                 print(f"Failed to download GFS {gfs_mslp_file}, status code: {r.status_code}")
                 run_date, run_hour = find_valid_run()
@@ -229,6 +231,7 @@ for step in forecast_steps:
                         if chunk:
                             f.write(chunk)
                 print(f"Saved GFS TMP GRIB: {gfs_tmp_path}")
+                time.sleep(2)
             else:
                 print(f"Failed to download GFS {gfs_tmp_file}, status code: {r.status_code}")
                 run_date, run_hour = find_valid_run()
@@ -309,6 +312,7 @@ for step in forecast_steps:
                             if chunk:
                                 f.write(chunk)
                     print(f"Saved GEFS GRIB: {gefs_path}")
+                    time.sleep(2)
                 else:
                     print(f"Failed to download GEFS {gefs_file}, status code: {r.status_code}")
                     run_date, run_hour = find_valid_run()
@@ -323,6 +327,7 @@ for step in forecast_steps:
                             if chunk:
                                 f.write(chunk)
                     print(f"Saved GEFS GRIB: {gefs_mslp_path}")
+                    time.sleep(2)
                 else:
                     print(f"Failed to download GEFS {gefs_mslp_file}, status code: {r.status_code}")
                     run_date, run_hour = find_valid_run()
@@ -338,6 +343,7 @@ for step in forecast_steps:
                             if chunk:
                                 f.write(chunk)
                     print(f"Saved GEFS TMP GRIB: {gefs_tmp_path}")
+                    time.sleep(2)
                 else:
                     print(f"Failed to download GEFS {gefs_tmp_file}, status code: {r.status_code}")
                     run_date, run_hour = find_valid_run()
@@ -639,7 +645,7 @@ for step in forecast_steps:
     # place the main title above the plot
     forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
     fig.suptitle(
-        f"plot2 estimated precip/prate then & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day})",
+        f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day})",
         fontsize=9,
         fontweight='bold',
         y=0.80
