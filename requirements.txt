@@ -12,3 +12,5 @@ Werkzeug==2.2.2
 psutil
 pillow
 filelock
+pytz
+
