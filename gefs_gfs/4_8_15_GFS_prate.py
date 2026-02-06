@@ -658,6 +658,25 @@ for step in forecast_steps:
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
 
+    # remove any grib files for this forecast hour to avoid accumulation
+    try:
+        deleted = []
+        for fname in os.listdir(os.path.join(BASE_DIR_AVG, "grib")):
+            if f"f{step_str}" in fname:
+                p = os.path.join(BASE_DIR_AVG, "grib", fname)
+                try:
+                    os.remove(p)
+                    deleted.append(p)
+                except Exception as ex:
+                    print(f"Failed to delete {p}: {ex}")
+        if deleted:
+            for d in deleted:
+                print(f"Deleted GRIB: {d}")
+        else:
+            print(f"No GRIB files found for FH{step_str} to delete.")
+    except Exception as e:
+        print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
+
     gc.collect()
     time.sleep(1)
 
