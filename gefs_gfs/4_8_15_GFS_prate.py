@@ -35,6 +35,10 @@ if os.path.isdir(grib_dir):
 os.makedirs(grib_dir, exist_ok=True)
 os.makedirs(png_dir, exist_ok=True)
 
+# NEW: directory to store previous-run averaged arrays for accuracy comparisons
+prev_dir = os.path.join(BASE_DIR_AVG, "prev")
+os.makedirs(prev_dir, exist_ok=True)
+
 # -----------------------------
 # CLEAR ONLY AVG PNGs
 # -----------------------------
@@ -409,6 +413,45 @@ for step in forecast_steps:
     # Convert avg_temp from K -> F
     avg_temp_F = (avg_temp - 273.15) * 9.0/5.0 + 32.0  # NEW
 
+    # -----------------------------
+    # NEW: compute accuracy vs previous run for same VALID TIME
+    # -----------------------------
+    # compute run datetime (UTC) and valid datetime for this forecast
+    run_datetime_utc = datetime.strptime(f"{run_date} {run_hour}", "%Y%m%d %H")
+    valid_dt = run_datetime_utc + timedelta(hours=forecast_hour)
+    valid_tag = valid_dt.strftime("%Y%m%d_%H")  # e.g. 20240203_18 (UTC valid time)
+    prev_file = os.path.join(prev_dir, f"avg_prate_valid_{valid_tag}.npy")
+
+    accuracy_pct = None
+    try:
+        if os.path.exists(prev_file):
+            prev_data = np.load(prev_file)
+            # resize previous to current if needed
+            if prev_data.shape != avg_data.shape:
+                zoom_factors = (avg_data.shape[0] / prev_data.shape[0], avg_data.shape[1] / prev_data.shape[1])
+                prev_resized = zoom(prev_data, zoom_factors, order=1)
+            else:
+                prev_resized = prev_data
+            # mask NaNs and compute MAE relative to previous magnitude
+            mask = ~np.isnan(avg_data) & ~np.isnan(prev_resized)
+            if np.any(mask):
+                mae = np.mean(np.abs(avg_data[mask] - prev_resized[mask]))
+                mean_prev = np.mean(np.abs(prev_resized[mask]))
+                accuracy_pct = max(0.0, min(100.0, 100.0 * (1.0 - mae / (mean_prev + 1e-6))))
+            else:
+                accuracy_pct = None
+        else:
+            accuracy_pct = None
+    except Exception as e:
+        print(f"Warning computing accuracy for FH{step_str}: {e}")
+        accuracy_pct = None
+
+    # save this run's avg for next run comparison (overwrite)
+    try:
+        np.save(prev_file, avg_data)
+    except Exception as e:
+        print(f"Warning saving prev file {prev_file}: {e}")
+
     # ---- PLOT PRATE AND MSLP ----
     fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
     ax = plt.axes(projection=ccrs.PlateCarree())
@@ -644,8 +687,9 @@ for step in forecast_steps:
 
     # place the main title above the plot
     forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
+    accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
     fig.suptitle(
-        f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day})",
+        f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
         fontsize=9,
         fontweight='bold',
         y=0.80
