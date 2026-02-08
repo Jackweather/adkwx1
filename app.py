@@ -8,10 +8,12 @@ import re
 
 app = Flask(__name__)
 
-# Replace single PNG_DIR with a mapping for both outputs
+# Add new groups for 3_12_18 and 7_11 outputs
 PNG_DIRS = {
     "5_6_10": os.path.join(os.getcwd(), "gefs_gfs", "5_6_10_GFS_OUTPUT", "png"),
     "4_8_15": os.path.join(os.getcwd(), "gefs_gfs", "4_8_15_GFS_OUTPUT", "png"),
+    "3_12_18": os.path.join(os.getcwd(), "gefs_gfs", "3_12_18_GFS_OUTPUT", "png"),
+    "7_11": os.path.join(os.getcwd(), "gefs_gfs", "7_11_GFS_OUTPUT", "png"),
 }
 
 @app.route('/')
@@ -41,21 +43,17 @@ def index():
         return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
     ordered_keys = sorted(all_keys, key=key_sort)
 
-    # create slides pairing left/right (use groups order from PNG_DIRS)
+    # create slides pairing four groups (use groups order from PNG_DIRS)
     groups = list(PNG_DIRS.keys())
-    left_group = groups[0] if len(groups) > 0 else None
-    right_group = groups[1] if len(groups) > 1 else None
-
     slides = []
     for k in ordered_keys:
         slide = {
             "index": k,
-            "left": group_files.get(left_group, {}).get(k) if left_group else None,
-            "right": group_files.get(right_group, {}).get(k) if right_group else None
+            "images": {group: group_files.get(group, {}).get(k) for group in groups}
         }
         slides.append(slide)
 
-    return render_template('index.html', slides=slides, left_group=left_group, right_group=right_group)
+    return render_template('index.html', slides=slides, groups=groups)
 
 @app.route('/pngs/<group>/<filename>')
 def serve_png(group, filename):
@@ -71,6 +69,8 @@ def run_task1():
         scripts = [
             ("/opt/render/project/src/gefs_gfs/5_6_10_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
             ("/opt/render/project/src/gefs_gfs/4_8_15_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+            ("/opt/render/project/src/gefs_gfs/7_11_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+            ("/opt/render/project/src/gefs_gfs/3_12_18_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ]
         for script, cwd in scripts:
             try:
