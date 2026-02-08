@@ -698,7 +698,7 @@ for step in forecast_steps:
     cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
     cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-    cb1.set_label("Average Surface PRATE (GFS + GEFS3 + GEFS12 + GEFS18) mm/hr", fontsize=7)
+    cb1.set_label("Average Surface PRATE (GFS + GEFS7 + GEFS11) mm/hr", fontsize=7)
     cb1.ax.tick_params(labelsize=6)
     cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
     cb2.set_label("Snow (avg PRATE where T < 32°F) mm/hr", fontsize=7)
