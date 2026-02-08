@@ -39,6 +39,25 @@ os.makedirs(png_dir, exist_ok=True)
 prev_dir = os.path.join(BASE_DIR_AVG, "prev")
 os.makedirs(prev_dir, exist_ok=True)
 
+# File to track completed forecast steps for the current run
+processed_steps_file = os.path.join(BASE_DIR_AVG, "processed_steps_4_8_15.txt")
+
+# Clear the processed steps file at the start of a new run
+if os.path.exists(processed_steps_file):
+    os.remove(processed_steps_file)
+
+# Helper function to load processed steps
+def load_processed_steps():
+    if os.path.exists(processed_steps_file):
+        with open(processed_steps_file, "r") as f:
+            return set(line.strip() for line in f)
+    return set()
+
+# Helper function to save a processed step
+def save_processed_step(step):
+    with open(processed_steps_file, "a") as f:
+        f.write(f"{step}\n")
+
 # -----------------------------
 # CLEAR ONLY AVG PNGs
 # -----------------------------
@@ -679,7 +698,7 @@ for step in forecast_steps:
     cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
     cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-    cb1.set_label("Average Surface PRATE (GFS + GEFS5 + GEFS6 + GEFS10) mm/hr", fontsize=7)
+    cb1.set_label("Average Surface PRATE (GFS + GEFS4 + GEFS8 + GEFS15) mm/hr", fontsize=7)
     cb1.ax.tick_params(labelsize=6)
     cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
     cb2.set_label("Snow (avg PRATE where T < 32°F) mm/hr", fontsize=7)
@@ -701,6 +720,9 @@ for step in forecast_steps:
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
+
+    # mark this step as processed
+    save_processed_step(step_str)
 
     # remove any grib files for this forecast hour to avoid accumulation
     try:
