@@ -39,6 +39,25 @@ os.makedirs(png_dir, exist_ok=True)
 prev_dir = os.path.join(BASE_DIR_AVG, "prev")
 os.makedirs(prev_dir, exist_ok=True)
 
+# Use a unique processed steps file for this script
+processed_steps_file = os.path.join(BASE_DIR_AVG, "processed_steps_5_6_10.txt")
+
+# Clear the processed steps file at the start of a new run
+if os.path.exists(processed_steps_file):
+    os.remove(processed_steps_file)
+
+# Helper function to load processed steps
+def load_processed_steps():
+    if os.path.exists(processed_steps_file):
+        with open(processed_steps_file, "r") as f:
+            return set(line.strip() for line in f)
+    return set()
+
+# Helper function to save a processed step
+def save_processed_step(step):
+    with open(processed_steps_file, "a") as f:
+        f.write(f"{step}\n")
+
 # -----------------------------
 # CLEAR ONLY AVG PNGs
 # -----------------------------
@@ -671,6 +690,9 @@ for step in forecast_steps:
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
+
+    # mark this step as processed
+    save_processed_step(step_str)
 
     # remove any grib files for this forecast hour to avoid accumulation
     try:
