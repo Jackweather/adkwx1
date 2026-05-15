@@ -628,14 +628,44 @@ for step in forecast_steps:
         lows = filter_same_contour(lows, contour_interval)
         highs = filter_same_contour(highs, contour_interval)
 
-        # Ensure there are exactly 2 lows and 2 highs
-        if len(lows) < 2:
-            lows += [lows[0]] * (2 - len(lows))  # Duplicate the most prominent low if fewer than 2
-        if len(highs) < 2:
-            highs += [highs[0]] * (2 - len(highs))  # Duplicate the most prominent high if fewer than 2
+        # FALLBACKS: pick global min/max restricted to the plotting extent (respect edge_buffer)
+        valid_mask = (
+            (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
+            (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
+        )
 
-        lows = lows[:2]  # Ensure only 2 lows
-        highs = highs[:2]  # Ensure only 2 highs
+        if len(lows) == 0:
+            try:
+                masked = np.where(valid_mask, smoothed_data, np.nan)
+                if not np.all(np.isnan(masked)):
+                    idx = np.unravel_index(np.nanargmin(masked), masked.shape)
+                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                    lows.append((lon_pt, lat_pt, val, "L"))
+            except Exception:
+                pass
+
+        if len(highs) == 0:
+            try:
+                masked = np.where(valid_mask, smoothed_data, np.nan)
+                if not np.all(np.isnan(masked)):
+                    idx = np.unravel_index(np.nanargmax(masked), masked.shape)
+                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                    highs.append((lon_pt, lat_pt, val, "H"))
+            except Exception:
+                pass
+
+        # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
+        if len(lows) == 1:
+            lows += [lows[0]]
+        if len(highs) == 1:
+            highs += [highs[0]]
+        if len(lows) == 0:
+            lows = []
+        if len(highs) == 0:
+            highs = []
+
+        lows = lows[:2]
+        highs = highs[:2]
 
         # Plot lows and highs with pressure values (ensure they are topmost)
         for lon, lat, value, label in lows + highs:
@@ -679,7 +709,7 @@ for step in forecast_steps:
     accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
     fig.suptitle(
         f" plot1 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
-        fontsize=9,
+        fontsize=8,
         fontweight='bold',
         y=0.80
     )
