@@ -1,4 +1,5 @@
 from flask import Flask, render_template, send_from_directory, abort
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import os
 import subprocess
 import threading
@@ -72,21 +73,30 @@ def run_task1():
             ("/opt/render/project/src/gefs_gfs/7_11_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
             ("/opt/render/project/src/gefs_gfs/3_12_18_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ]
-        for script, cwd in scripts:
+
+        def run_script(script, cwd):
             try:
                 result = subprocess.run(
                     ["python", script],
                     check=True, cwd=cwd,
                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
                 )
-                print(f"{os.path.basename(script)} ran successfully!")
-                print("STDOUT:", result.stdout)
-                print("STDERR:", result.stderr)
+                return script, result, None
             except subprocess.CalledProcessError as e:
-                error_trace = traceback.format_exc()
-                print(f"Error running {os.path.basename(script)}:\n{error_trace}")
-                print("STDOUT:", e.stdout)
-                print("STDERR:", e.stderr)
+                return script, e, traceback.format_exc()
+
+        with ThreadPoolExecutor(max_workers=2) as executor:
+            futures = [executor.submit(run_script, script, cwd) for script, cwd in scripts]
+            for future in as_completed(futures):
+                script, result, error_trace = future.result()
+                if error_trace:
+                    print(f"Error running {os.path.basename(script)}:\n{error_trace}")
+                    print("STDOUT:", result.stdout)
+                    print("STDERR:", result.stderr)
+                else:
+                    print(f"{os.path.basename(script)} ran successfully!")
+                    print("STDOUT:", result.stdout)
+                    print("STDERR:", result.stderr)
 
     # Run the task in a separate thread
     threading.Thread(target=run_all_scripts).start()
