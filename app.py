@@ -9,6 +9,56 @@ import re
 
 app = Flask(__name__)
 
+
+def run_scripts(scripts, max_workers):
+    print("Flask is running as user:", getpass.getuser())  # Print user for debugging
+
+    def run_script(script, cwd):
+        try:
+            result = subprocess.run(
+                ["python", script],
+                check=True, cwd=cwd,
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            )
+            return script, result, None
+        except subprocess.CalledProcessError as e:
+            return script, e, traceback.format_exc()
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        script_iter = iter(scripts)
+        active_futures = {}
+
+        for _ in range(max_workers):
+            try:
+                script, cwd = next(script_iter)
+            except StopIteration:
+                break
+            active_futures[executor.submit(run_script, script, cwd)] = script
+
+        while active_futures:
+            done, _ = wait(active_futures, return_when=FIRST_COMPLETED)
+            for future in done:
+                script, result, error_trace = future.result()
+                active_futures.pop(future, None)
+
+                if error_trace:
+                    print(f"Error running {os.path.basename(script)}:\n{error_trace}")
+                    print("STDOUT:", result.stdout)
+                    print("STDERR:", result.stderr)
+                else:
+                    print(f"{os.path.basename(script)} ran successfully!")
+                    print("STDOUT:", result.stdout)
+                    print("STDERR:", result.stderr)
+
+                try:
+                    next_script, next_cwd = next(script_iter)
+                except StopIteration:
+                    continue
+
+                active_futures[executor.submit(run_script, next_script, next_cwd)] = next_script
+
+    print("All queued scripts finished. Background task ending.")
+
 # Add new groups for 3_12_18 and 7_11 outputs
 PNG_DIRS = {
     "5_6_10": os.path.join(os.getcwd(), "gefs_gfs", "5_6_10_GFS_OUTPUT", "png"),
@@ -65,64 +115,14 @@ def serve_png(group, filename):
 
 @app.route("/run-task1")
 def run_task1():
-    def run_all_scripts():
-        print("Flask is running as user:", getpass.getuser())  # Print user for debugging
-        scripts = [
-            ("/opt/render/project/src/gefs_gfs/5_6_10_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
-            ("/opt/render/project/src/gefs_gfs/4_8_15_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
-            ("/opt/render/project/src/gefs_gfs/7_11_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
-            ("/opt/render/project/src/gefs_gfs/3_12_18_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
-        ]
-
-        def run_script(script, cwd):
-            try:
-                result = subprocess.run(
-                    ["python", script],
-                    check=True, cwd=cwd,
-                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-                return script, result, None
-            except subprocess.CalledProcessError as e:
-                return script, e, traceback.format_exc()
-
-        with ThreadPoolExecutor(max_workers=2) as executor:
-            script_iter = iter(scripts)
-            active_futures = {}
-
-            for _ in range(2):
-                try:
-                    script, cwd = next(script_iter)
-                except StopIteration:
-                    break
-                active_futures[executor.submit(run_script, script, cwd)] = script
-
-            while active_futures:
-                done, _ = wait(active_futures, return_when=FIRST_COMPLETED)
-                for future in done:
-                    script, result, error_trace = future.result()
-                    active_futures.pop(future, None)
-
-                    if error_trace:
-                        print(f"Error running {os.path.basename(script)}:\n{error_trace}")
-                        print("STDOUT:", result.stdout)
-                        print("STDERR:", result.stderr)
-                    else:
-                        print(f"{os.path.basename(script)} ran successfully!")
-                        print("STDOUT:", result.stdout)
-                        print("STDERR:", result.stderr)
-
-                    try:
-                        next_script, next_cwd = next(script_iter)
-                    except StopIteration:
-                        continue
-
-                    active_futures[executor.submit(run_script, next_script, next_cwd)] = next_script
-
-        print("All queued scripts finished. Background task ending.")
-
-    # Run the task in a separate thread
-    threading.Thread(target=run_all_scripts).start()
-    return "Task started in background. It will stop after each queued script runs once.", 200
+    scripts = [
+        ("/opt/render/project/src/gefs_gfs/5_6_10_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+        ("/opt/render/project/src/gefs_gfs/4_8_15_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+        ("/opt/render/project/src/gefs_gfs/7_11_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+        ("/opt/render/project/src/gefs_gfs/3_12_18_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
+    ]
+    threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
+    return "Task started in background! Check logs folder for output.", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
