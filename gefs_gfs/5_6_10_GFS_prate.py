@@ -2,7 +2,6 @@ import os
 import shutil
 import requests
 import xarray as xr
-import cfgrib
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -99,9 +98,9 @@ def format_local_time(run_date, run_hour, forecast_hour):
     forecast_day = forecast_datetime_est.strftime("%A")  # Get the day of the week
     return local_time, forecast_day
 
-def open_first_cfgrib_dataset(path):
-    datasets = cfgrib.open_datasets(path)
-    for dataset in datasets:
+def open_csnow_dataset(path):
+    for kwargs in ({}, {'filter_by_keys': {'stepType': 'avg'}}, {'filter_by_keys': {'typeOfLevel': 'surface'}}):
+        dataset = xr.open_dataset(path, engine="cfgrib", **kwargs)
         if dataset.data_vars:
             return dataset
     raise ValueError(f"No data variables found in {path}")
@@ -270,7 +269,7 @@ for step in forecast_steps:
 
     # Open GFS CSNOW
     try:
-        ds_gfs_csnow = open_first_cfgrib_dataset(gfs_csnow_path)
+        ds_gfs_csnow = open_csnow_dataset(gfs_csnow_path)
         csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
         csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
         data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
@@ -376,7 +375,7 @@ for step in forecast_steps:
 
         # Open GEFS CSNOW
         try:
-            ds_gefs_csnow = open_first_cfgrib_dataset(gefs_csnow_path)
+            ds_gefs_csnow = open_csnow_dataset(gefs_csnow_path)
             csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
             csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
             data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
