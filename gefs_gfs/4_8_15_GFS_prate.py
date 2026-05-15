@@ -282,7 +282,7 @@ for step in forecast_steps:
 
     # Open GFS CSNOW
     try:
-        ds_gfs_csnow = xr.open_dataset(gfs_csnow_path, engine="cfgrib")
+        ds_gfs_csnow = xr.open_dataset(gfs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
         csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
         csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
         data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
@@ -388,7 +388,7 @@ for step in forecast_steps:
 
         # Open GEFS CSNOW
         try:
-            ds_gefs_csnow = xr.open_dataset(gefs_csnow_path, engine="cfgrib")
+            ds_gefs_csnow = xr.open_dataset(gefs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
             csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
             csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
             data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
