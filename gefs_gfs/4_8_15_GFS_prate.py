@@ -709,7 +709,7 @@ for step in forecast_steps:
     accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
     fig.suptitle(
         f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
-        fontsize=9,
+        fontsize=8,
         fontweight='bold',
         y=0.80
     )
