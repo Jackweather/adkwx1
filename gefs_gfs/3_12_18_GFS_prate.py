@@ -58,12 +58,41 @@ def save_processed_step(step):
     with open(processed_steps_file, "a") as f:
         f.write(f"{step}\n")
 
-def open_csnow_dataset(path):
+def load_grib_field(path, variable_name, *, filter_by_keys=None, scale=1.0, dtype=np.float32):
+    dataset = xr.open_dataset(path, engine="cfgrib", filter_by_keys=filter_by_keys)
+    try:
+        data = np.asarray(dataset[variable_name].values, dtype=dtype).squeeze()
+        lats = np.asarray(dataset["latitude"].values) if "latitude" in dataset else None
+        lons = np.asarray(dataset["longitude"].values) if "longitude" in dataset else None
+    finally:
+        dataset.close()
+
+    if scale != 1.0:
+        data *= scale
+    return data, lats, lons
+
+def load_csnow_array(path, dtype=np.float32):
+    last_error = None
     for kwargs in ({}, {'filter_by_keys': {'stepType': 'avg'}}, {'filter_by_keys': {'typeOfLevel': 'surface'}}):
-        dataset = xr.open_dataset(path, engine="cfgrib", **kwargs)
-        if dataset.data_vars:
-            return dataset
-    raise ValueError(f"No data variables found in {path}")
+        dataset = None
+        try:
+            dataset = xr.open_dataset(path, engine="cfgrib", **kwargs)
+            if dataset.data_vars:
+                csnow_vars = [v for v in dataset.data_vars if 'csnow' in v.lower()]
+                csnow_var_name = csnow_vars[0] if csnow_vars else list(dataset.data_vars)[0]
+                return np.asarray(dataset[csnow_var_name].values, dtype=dtype).squeeze()
+        except Exception as exc:
+            last_error = exc
+        finally:
+            if dataset is not None:
+                dataset.close()
+    raise ValueError(f"No data variables found in {path}") from last_error
+
+def resize_to_match(data, target_shape, order):
+    if data.shape == target_shape:
+        return data
+    zoom_factors = (target_shape[0] / data.shape[0], target_shape[1] / data.shape[1])
+    return zoom(data, zoom_factors, order=order)
 
 # -----------------------------
 # CLEAR ONLY AVG PNGs
@@ -187,9 +216,10 @@ gefs_members = ["03", "12", "18"]  # members to include
 for step in forecast_steps:
     step_str = f"{step:03d}"
     forecast_hour = step  # Forecast hour in hours
-    gefs_data_list = []
-    gefs_mslp_list = []  # List to store MSLP data
-    gefs_csnow_list = []  # List to store categorical snow masks
+    ensemble_count = 0
+    sum_data = None
+    sum_mslp = None
+    sum_csnow = None
 
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
@@ -269,10 +299,12 @@ for step in forecast_steps:
 
     # Open GFS PRATE
     try:
-        ds_gfs = xr.open_dataset(gfs_path, engine="cfgrib", filter_by_keys={'stepType': 'avg'})
-        data_gfs = ds_gfs['prate'].values * 3600  # mm/hr
-        lats = ds_gfs['latitude'].values
-        lons = ds_gfs['longitude'].values
+        data_gfs, lats, lons = load_grib_field(
+            gfs_path,
+            'prate',
+            filter_by_keys={'stepType': 'avg'},
+            scale=3600,
+        )
         lons_plot = np.where(lons > 180, lons - 360, lons)
     except Exception as e:
         print(f"Failed to open GFS GRIB FH{step_str}: {e}")
@@ -280,25 +312,27 @@ for step in forecast_steps:
 
     # Open GFS MSLP
     try:
-        ds_gfs_mslp = xr.open_dataset(gfs_mslp_path, engine="cfgrib", filter_by_keys={'typeOfLevel': 'meanSea'})
-        data_gfs_mslp = ds_gfs_mslp['mslet'].values / 100  # Convert Pa to hPa
+        data_gfs_mslp, _, _ = load_grib_field(
+            gfs_mslp_path,
+            'mslet',
+            filter_by_keys={'typeOfLevel': 'meanSea'},
+            scale=0.01,
+        )
     except Exception as e:
         print(f"Failed to open GFS MSLP GRIB FH{step_str}: {e}")
         continue
 
     # Open GFS CSNOW
     try:
-        ds_gfs_csnow = open_csnow_dataset(gfs_csnow_path)
-        csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
-        csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
-        data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
+        data_gfs_csnow = load_csnow_array(gfs_csnow_path)
     except Exception as e:
         print(f"Failed to open GFS CSNOW GRIB FH{step_str}: {e}")
         continue
 
-    gefs_data_list.append(data_gfs.squeeze())
-    gefs_mslp_list.append(data_gfs_mslp.squeeze())
-    gefs_csnow_list.append(data_gfs_csnow.squeeze())
+    sum_data = data_gfs
+    sum_mslp = data_gfs_mslp
+    sum_csnow = data_gfs_csnow
+    ensemble_count = 1
 
     # ---- GEFS MEMBERS ----
     for member in gefs_members:
@@ -378,57 +412,52 @@ for step in forecast_steps:
 
         # Open GEFS PRATE
         try:
-            ds_gefs = xr.open_dataset(gefs_path, engine="cfgrib", filter_by_keys={'stepType': 'avg'})
-            data_gefs = ds_gefs['prate'].values * 3600
+            data_gefs, _, _ = load_grib_field(
+                gefs_path,
+                'prate',
+                filter_by_keys={'stepType': 'avg'},
+                scale=3600,
+            )
         except Exception as e:
             print(f"Failed to open GEFS member {member} PRATE FH{step_str}: {e}")
             continue
 
         # Open GEFS MSLP
         try:
-            ds_gefs_mslp = xr.open_dataset(gefs_mslp_path, engine="cfgrib", filter_by_keys={'typeOfLevel': 'meanSea'})
-            data_gefs_mslp = ds_gefs_mslp['mslet'].values / 100  # Convert Pa to hPa
+            data_gefs_mslp, _, _ = load_grib_field(
+                gefs_mslp_path,
+                'mslet',
+                filter_by_keys={'typeOfLevel': 'meanSea'},
+                scale=0.01,
+            )
         except Exception as e:
             print(f"Failed to open GEFS member {member} MSLP FH{step_str}: {e}")
             continue
 
         # Open GEFS CSNOW
         try:
-            ds_gefs_csnow = open_csnow_dataset(gefs_csnow_path)
-            csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
-            csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
-            data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
+            data_gefs_csnow = load_csnow_array(gefs_csnow_path)
         except Exception as e:
             print(f"Failed to open GEFS member {member} CSNOW FH{step_str}: {e}")
             continue
 
         # Resize GEFS PRATE and MSLP to match GFS grid if needed
-        if data_gefs.shape != data_gfs.shape:
-            zoom_factors = (data_gfs.shape[0] / data_gefs.shape[0], data_gfs.shape[1] / data_gefs.shape[1])
-            data_gefs_resized = zoom(data_gefs.squeeze(), zoom_factors, order=1)
-        else:
-            data_gefs_resized = data_gefs.squeeze()
+        data_gefs_resized = resize_to_match(data_gefs, data_gfs.shape, order=1)
+        data_gefs_mslp_resized = resize_to_match(data_gefs_mslp, data_gfs_mslp.shape, order=1)
+        data_gefs_csnow_resized = resize_to_match(data_gefs_csnow, data_gfs_csnow.shape, order=0)
 
-        if data_gefs_mslp.shape != data_gfs_mslp.shape:
-            zoom_factors = (data_gfs_mslp.shape[0] / data_gefs_mslp.shape[0], data_gfs_mslp.shape[1] / data_gefs_mslp.shape[1])
-            data_gefs_mslp_resized = zoom(data_gefs_mslp.squeeze(), zoom_factors, order=1)
-        else:
-            data_gefs_mslp_resized = data_gefs_mslp.squeeze()
+        sum_data += data_gefs_resized
+        sum_mslp += data_gefs_mslp_resized
+        sum_csnow += data_gefs_csnow_resized
+        ensemble_count += 1
 
-        if data_gefs_csnow.shape != data_gfs_csnow.shape:
-            zoom_factors = (data_gfs_csnow.shape[0] / data_gefs_csnow.shape[0], data_gfs_csnow.shape[1] / data_gefs_csnow.shape[1])
-            data_gefs_csnow_resized = zoom(data_gefs_csnow.squeeze(), zoom_factors, order=0)
-        else:
-            data_gefs_csnow_resized = data_gefs_csnow.squeeze()
-
-        gefs_data_list.append(data_gefs_resized)
-        gefs_mslp_list.append(data_gefs_mslp_resized)
-        gefs_csnow_list.append(data_gefs_csnow_resized)
+        del data_gefs, data_gefs_mslp, data_gefs_csnow
+        del data_gefs_resized, data_gefs_mslp_resized, data_gefs_csnow_resized
 
     # ---- COMPUTE FINAL AVERAGES ----
-    avg_data = np.mean(gefs_data_list, axis=0)
-    avg_mslp = np.mean(gefs_mslp_list, axis=0)
-    avg_csnow = np.mean(gefs_csnow_list, axis=0)
+    avg_data = sum_data / ensemble_count
+    avg_mslp = sum_mslp / ensemble_count
+    avg_csnow = sum_csnow / ensemble_count
 
     # -----------------------------
     # NEW: compute accuracy vs previous run for same VALID TIME
@@ -739,6 +768,10 @@ for step in forecast_steps:
             print(f"No GRIB files found for FH{step_str} to delete.")
     except Exception as e:
         print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
+
+    del avg_data, avg_mslp, avg_csnow
+    del sum_data, sum_mslp, sum_csnow
+    del data_gfs, data_gfs_mslp, data_gfs_csnow
 
     gc.collect()
     time.sleep(1)
