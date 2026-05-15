@@ -2,6 +2,7 @@ import os
 import shutil
 import requests
 import xarray as xr
+import cfgrib
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -38,25 +39,6 @@ os.makedirs(png_dir, exist_ok=True)
 # NEW: directory to store previous-run averaged arrays for accuracy comparisons
 prev_dir = os.path.join(BASE_DIR_AVG, "prev")
 os.makedirs(prev_dir, exist_ok=True)
-
-# File to track completed forecast steps for the current run
-processed_steps_file = os.path.join(BASE_DIR_AVG, "processed_steps_4_8_15.txt")
-
-# Clear the processed steps file at the start of a new run
-if os.path.exists(processed_steps_file):
-    os.remove(processed_steps_file)
-
-# Helper function to load processed steps
-def load_processed_steps():
-    if os.path.exists(processed_steps_file):
-        with open(processed_steps_file, "r") as f:
-            return set(line.strip() for line in f)
-    return set()
-
-# Helper function to save a processed step
-def save_processed_step(step):
-    with open(processed_steps_file, "a") as f:
-        f.write(f"{step}\n")
 
 # -----------------------------
 # CLEAR ONLY AVG PNGs
@@ -117,6 +99,13 @@ def format_local_time(run_date, run_hour, forecast_hour):
     forecast_day = forecast_datetime_est.strftime("%A")  # Get the day of the week
     return local_time, forecast_day
 
+def open_first_cfgrib_dataset(path):
+    datasets = cfgrib.open_datasets(path)
+    for dataset in datasets:
+        if dataset.data_vars:
+            return dataset
+    raise ValueError(f"No data variables found in {path}")
+
 # -----------------------------
 # FIND MOST RECENT RUN WITH VALID DATA
 # -----------------------------
@@ -172,7 +161,6 @@ mslp_cmap = plt.cm.viridis  # Use a perceptually uniform colormap for MSLP
 # -----------------------------
 base_url_gfs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 base_url_gefs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50b.pl"
-base_url_gefs_csnow = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl"
 gefs_members = ["04", "08", "15"]  # members to include
 
 # -----------------------------
@@ -183,7 +171,7 @@ for step in forecast_steps:
     forecast_hour = step  # Forecast hour in hours
     gefs_data_list = []
     gefs_mslp_list = []  # List to store MSLP data
-    gefs_csnow_list = []
+    gefs_csnow_list = []  # List to store categorical snow masks
 
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
@@ -282,7 +270,7 @@ for step in forecast_steps:
 
     # Open GFS CSNOW
     try:
-        ds_gfs_csnow = xr.open_dataset(gfs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+        ds_gfs_csnow = open_first_cfgrib_dataset(gfs_csnow_path)
         csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
         csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
         data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
@@ -316,7 +304,7 @@ for step in forecast_steps:
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
             )
             gefs_csnow_url = (
-                f"{base_url_gefs_csnow}?file=gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}"
+                f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl?file=gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}"
                 f"&var_CSNOW=on&lev_surface=on"
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2ap5"
@@ -388,7 +376,7 @@ for step in forecast_steps:
 
         # Open GEFS CSNOW
         try:
-            ds_gefs_csnow = xr.open_dataset(gefs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+            ds_gefs_csnow = open_first_cfgrib_dataset(gefs_csnow_path)
             csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
             csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
             data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
@@ -501,8 +489,7 @@ for step in forecast_steps:
     )
     ax.clabel(mslp_contours, fmt='%d', fontsize=6)
 
-    # Draw snow overlay where the categorical snow field indicates snow.
-    # use the user-provided discrete snow scheme
+    # Use PRATE intensity only where the ensemble mean categorical snow mask is present.
     snow_levels = [0.10, 0.25, 0.5, 1, 2, 4, 8, 16]
     snow_colors = [
         "#e3f2fd",  # 0.10 very light blue
@@ -517,11 +504,8 @@ for step in forecast_steps:
     snow_cmap = LinearSegmentedColormap.from_list("snow_cbar", snow_colors, N=len(snow_colors))
     snow_norm = BoundaryNorm(snow_levels, snow_cmap.N)
 
-    snow_threshold = 0.5
-    if np.nanmax(avg_csnow) > 1.0:
-        snow_threshold = 50.0
-
-    snow_mask = avg_csnow >= snow_threshold
+    # CSNOW is categorical, so keep nearest-neighbor-resized values and threshold the mean mask.
+    snow_mask = avg_csnow >= 0.5
     snow_prate_masked = np.ma.masked_where(~snow_mask, avg_data)
 
     # draw snow overlay on top, solid blue shades (intensity from PRATE but using snow_levels)
@@ -693,10 +677,10 @@ for step in forecast_steps:
     cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
     cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-    cb1.set_label("Average Surface PRATE (GFS + GEFS4 + GEFS8 + GEFS15) mm/hr", fontsize=7)
+    cb1.set_label("Average Surface PRATE (GFS + GEFS5 + GEFS6 + GEFS10) mm/hr", fontsize=7)
     cb1.ax.tick_params(labelsize=6)
     cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-    cb2.set_label("Snow (avg PRATE where T < 32°F) mm/hr", fontsize=7)
+    cb2.set_label("Snow (avg PRATE where ensemble CSNOW is true) mm/hr", fontsize=7)
     cb2.ax.tick_params(labelsize=6)
 
     # place the main title above the plot
@@ -715,9 +699,6 @@ for step in forecast_steps:
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
-
-    # mark this step as processed
-    save_processed_step(step_str)
 
     # remove any grib files for this forecast hour to avoid accumulation
     try:
