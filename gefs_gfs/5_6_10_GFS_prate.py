@@ -616,11 +616,15 @@ for step in forecast_steps:
         lows = filter_same_contour(lows, contour_interval)
         highs = filter_same_contour(highs, contour_interval)
 
-        # Ensure there are exactly 2 lows and 2 highs
-        if len(lows) < 2:
-            lows += [lows[0]] * (2 - len(lows))  # Duplicate the most prominent low if fewer than 2
-        if len(highs) < 2:
-            highs += [highs[0]] * (2 - len(highs))  # Duplicate the most prominent high if fewer than 2
+        # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
+        if len(lows) == 1:
+            lows += [lows[0]]
+        if len(highs) == 1:
+            highs += [highs[0]]
+        if len(lows) == 0:
+            lows = []  # nothing to plot
+        if len(highs) == 0:
+            highs = []
 
         lows = lows[:2]  # Ensure only 2 lows
         highs = highs[:2]  # Ensure only 2 highs
