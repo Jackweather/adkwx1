@@ -2,6 +2,7 @@ import os
 import shutil
 import requests
 import xarray as xr
+import cfgrib
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
@@ -38,25 +39,6 @@ os.makedirs(png_dir, exist_ok=True)
 # NEW: directory to store previous-run averaged arrays for accuracy comparisons
 prev_dir = os.path.join(BASE_DIR_AVG, "prev")
 os.makedirs(prev_dir, exist_ok=True)
-
-# Use a unique processed steps file for this script
-processed_steps_file = os.path.join(BASE_DIR_AVG, "processed_steps_5_6_10.txt")
-
-# Clear the processed steps file at the start of a new run
-if os.path.exists(processed_steps_file):
-    os.remove(processed_steps_file)
-
-# Helper function to load processed steps
-def load_processed_steps():
-    if os.path.exists(processed_steps_file):
-        with open(processed_steps_file, "r") as f:
-            return set(line.strip() for line in f)
-    return set()
-
-# Helper function to save a processed step
-def save_processed_step(step):
-    with open(processed_steps_file, "a") as f:
-        f.write(f"{step}\n")
 
 # -----------------------------
 # CLEAR ONLY AVG PNGs
@@ -116,6 +98,13 @@ def format_local_time(run_date, run_hour, forecast_hour):
     local_time = forecast_datetime_est.strftime("%I %p").lstrip("0")  # Remove leading zero
     forecast_day = forecast_datetime_est.strftime("%A")  # Get the day of the week
     return local_time, forecast_day
+
+def open_first_cfgrib_dataset(path):
+    datasets = cfgrib.open_datasets(path)
+    for dataset in datasets:
+        if dataset.data_vars:
+            return dataset
+    raise ValueError(f"No data variables found in {path}")
 
 # -----------------------------
 # FIND MOST RECENT RUN WITH VALID DATA
@@ -182,7 +171,7 @@ for step in forecast_steps:
     forecast_hour = step  # Forecast hour in hours
     gefs_data_list = []
     gefs_mslp_list = []  # List to store MSLP data
-    gefs_csnow_list = []
+    gefs_csnow_list = []  # List to store categorical snow masks
 
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
@@ -281,7 +270,7 @@ for step in forecast_steps:
 
     # Open GFS CSNOW
     try:
-        ds_gfs_csnow = xr.open_dataset(gfs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+        ds_gfs_csnow = open_first_cfgrib_dataset(gfs_csnow_path)
         csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
         csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
         data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
@@ -298,7 +287,7 @@ for step in forecast_steps:
         while True:  # Retry logic for unavailable GEFS members
             gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
             gefs_mslp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_mslp.grib2"
-            gefs_csnow_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_csnow.grib2"
+            gefs_csnow_file = f"gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}_csnow.grib2"
             gefs_path = os.path.join(BASE_DIR_AVG, "grib", gefs_file)
             gefs_mslp_path = os.path.join(BASE_DIR_AVG, "grib", gefs_mslp_file)
             gefs_csnow_path = os.path.join(BASE_DIR_AVG, "grib", gefs_csnow_file)
@@ -315,10 +304,10 @@ for step in forecast_steps:
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
             )
             gefs_csnow_url = (
-                f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
+                f"https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl?file=gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}"
                 f"&var_CSNOW=on&lev_surface=on"
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
-                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
+                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2ap5"
             )
 
             # Download PRATE and MSLP if not exist
@@ -387,7 +376,7 @@ for step in forecast_steps:
 
         # Open GEFS CSNOW
         try:
-            ds_gefs_csnow = xr.open_dataset(gefs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+            ds_gefs_csnow = open_first_cfgrib_dataset(gefs_csnow_path)
             csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
             csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
             data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
@@ -500,7 +489,7 @@ for step in forecast_steps:
     )
     ax.clabel(mslp_contours, fmt='%d', fontsize=6)
 
-    # Draw snow overlay where the categorical snow field indicates snow.
+    # Use PRATE intensity only where the ensemble mean categorical snow mask is present.
     snow_levels = [0.10, 0.25, 0.5, 1, 2, 4, 8, 16]
     snow_colors = [
         "#e3f2fd",  # 0.10 very light blue
@@ -515,11 +504,8 @@ for step in forecast_steps:
     snow_cmap = LinearSegmentedColormap.from_list("snow_cbar", snow_colors, N=len(snow_colors))
     snow_norm = BoundaryNorm(snow_levels, snow_cmap.N)
 
-    snow_threshold = 0.5
-    if np.nanmax(avg_csnow) > 1.0:
-        snow_threshold = 50.0
-
-    snow_mask = avg_csnow >= snow_threshold
+    # CSNOW is categorical, so keep nearest-neighbor-resized values and threshold the mean mask.
+    snow_mask = avg_csnow >= 0.5
     snow_prate_masked = np.ma.masked_where(~snow_mask, avg_data)
 
     # draw snow overlay on top, solid blue shades (intensity from PRATE but using snow_levels)
@@ -621,44 +607,14 @@ for step in forecast_steps:
         lows = filter_same_contour(lows, contour_interval)
         highs = filter_same_contour(highs, contour_interval)
 
-        # FALLBACKS: pick global min/max restricted to the plotting extent (respect edge_buffer)
-        valid_mask = (
-            (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
-            (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
-        )
+        # Ensure there are exactly 2 lows and 2 highs
+        if len(lows) < 2:
+            lows += [lows[0]] * (2 - len(lows))  # Duplicate the most prominent low if fewer than 2
+        if len(highs) < 2:
+            highs += [highs[0]] * (2 - len(highs))  # Duplicate the most prominent high if fewer than 2
 
-        if len(lows) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmin(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    lows.append((lon_pt, lat_pt, val, "L"))
-            except Exception:
-                pass
-
-        if len(highs) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmax(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    highs.append((lon_pt, lat_pt, val, "H"))
-            except Exception:
-                pass
-
-        # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
-        if len(lows) == 1:
-            lows += [lows[0]]
-        if len(highs) == 1:
-            highs += [highs[0]]
-        if len(lows) == 0:
-            lows = []
-        if len(highs) == 0:
-            highs = []
-
-        lows = lows[:2]
-        highs = highs[:2]
+        lows = lows[:2]  # Ensure only 2 lows
+        highs = highs[:2]  # Ensure only 2 highs
 
         # Plot lows and highs with pressure values (ensure they are topmost)
         for lon, lat, value, label in lows + highs:
@@ -694,7 +650,7 @@ for step in forecast_steps:
     cb1.set_label("Average Surface PRATE (GFS + GEFS5 + GEFS6 + GEFS10) mm/hr", fontsize=7)
     cb1.ax.tick_params(labelsize=6)
     cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-    cb2.set_label("Snow (avg PRATE where CSNOW indicates snow) mm/hr", fontsize=7)
+    cb2.set_label("Snow (avg PRATE where ensemble CSNOW is true) mm/hr", fontsize=7)
     cb2.ax.tick_params(labelsize=6)
 
     # place the main title above the plot
@@ -713,9 +669,6 @@ for step in forecast_steps:
     plt.savefig(png_path, bbox_inches='tight', dpi=300)
     plt.close(fig)
     print(f"Saved final AVG PNG FH{step_str}: {png_path}")
-
-    # mark this step as processed
-    save_processed_step(step_str)
 
     # remove any grib files for this forecast hour to avoid accumulation
     try:
