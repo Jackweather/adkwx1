@@ -746,4 +746,4 @@ for step in forecast_steps:
     gc.collect()
     time.sleep(1)
 
-print("All GFS + GEFS4 + GEFS8 + GEFS15 averages downloaded and plotted in AVG_PRATE!")
+print("All GFS + GEFS3 + GEFS12 + GEFS18 averages downloaded and plotted in AVG_PRATE!")
