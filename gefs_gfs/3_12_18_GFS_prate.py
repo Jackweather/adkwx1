@@ -172,6 +172,7 @@ mslp_cmap = plt.cm.viridis  # Use a perceptually uniform colormap for MSLP
 # -----------------------------
 base_url_gfs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 base_url_gefs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50b.pl"
+base_url_gefs_csnow = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl"
 gefs_members = ["03", "12", "18"]  # members to include
 
 # -----------------------------
@@ -182,16 +183,16 @@ for step in forecast_steps:
     forecast_hour = step  # Forecast hour in hours
     gefs_data_list = []
     gefs_mslp_list = []  # List to store MSLP data
-    gefs_temp_list = []  # NEW: list to store temperature arrays
+    gefs_snow_list = []  # List to store CSNOW masks
 
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
         gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
         gfs_mslp_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_mslp.grib2"
-        gfs_tmp_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_tmp.grib2"  # NEW
+        gfs_csnow_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_csnow.grib2"
         gfs_path = os.path.join(BASE_DIR_AVG, "grib", gfs_file)
         gfs_mslp_path = os.path.join(BASE_DIR_AVG, "grib", gfs_mslp_file)
-        gfs_tmp_path = os.path.join(BASE_DIR_AVG, "grib", gfs_tmp_file)  # NEW
+        gfs_csnow_path = os.path.join(BASE_DIR_AVG, "grib", gfs_csnow_file)
         gfs_url = (
             f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
             f"&var_PRATE=on&lev_surface=on"
@@ -204,10 +205,9 @@ for step in forecast_steps:
             f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
             f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
         )
-        # NEW: temperature URL (near-surface 30-0 mb above ground as requested)
-        gfs_tmp_url = (
+        gfs_csnow_url = (
             f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
-            f"&var_TMP=on&lev_30-0_mb_above_ground=on"
+            f"&var_CSNOW=on&lev_surface=on"
             f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
             f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
         )
@@ -244,19 +244,19 @@ for step in forecast_steps:
                 run_date, run_hour = find_valid_run()
                 continue
 
-        # Download TMP if not exist (NEW)
-        if not os.path.exists(gfs_tmp_path):
-            print(f"Downloading GFS FH{step_str} TMP …")
-            r = requests.get(gfs_tmp_url, stream=True)
+        # Download CSNOW if not exist
+        if not os.path.exists(gfs_csnow_path):
+            print(f"Downloading GFS FH{step_str} CSNOW …")
+            r = requests.get(gfs_csnow_url, stream=True)
             if r.status_code == 200:
-                with open(gfs_tmp_path, 'wb') as f:
+                with open(gfs_csnow_path, 'wb') as f:
                     for chunk in r.iter_content(1024*64):
                         if chunk:
                             f.write(chunk)
-                print(f"Saved GFS TMP GRIB: {gfs_tmp_path}")
+                print(f"Saved GFS CSNOW GRIB: {gfs_csnow_path}")
                 time.sleep(2)
             else:
-                print(f"Failed to download GFS {gfs_tmp_file}, status code: {r.status_code}")
+                print(f"Failed to download GFS {gfs_csnow_file}, status code: {r.status_code}")
                 run_date, run_hour = find_valid_run()
                 continue
 
@@ -281,30 +281,29 @@ for step in forecast_steps:
         print(f"Failed to open GFS MSLP GRIB FH{step_str}: {e}")
         continue
 
-    # NEW: Open GFS TMP
+    # Open GFS CSNOW
     try:
-        ds_gfs_tmp = xr.open_dataset(gfs_tmp_path, engine="cfgrib")
-        # pick a temperature variable (prefer name containing 'tmp')
-        tmp_vars = [v for v in ds_gfs_tmp.data_vars if 'tmp' in v.lower()]
-        tmp_var_name = tmp_vars[0] if tmp_vars else list(ds_gfs_tmp.data_vars)[0]
-        data_gfs_tmp = ds_gfs_tmp[tmp_var_name].values  # likely Kelvin
+        ds_gfs_csnow = xr.open_dataset(gfs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'instant'})
+        csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
+        csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
+        data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
     except Exception as e:
-        print(f"Failed to open GFS TMP GRIB FH{step_str}: {e}")
+        print(f"Failed to open GFS CSNOW GRIB FH{step_str}: {e}")
         continue
 
     gefs_data_list.append(data_gfs.squeeze())
     gefs_mslp_list.append(data_gfs_mslp.squeeze())
-    gefs_temp_list.append(data_gfs_tmp.squeeze())  # NEW
+    gefs_snow_list.append(data_gfs_csnow.squeeze())
 
     # ---- GEFS MEMBERS ----
     for member in gefs_members:
         while True:  # Retry logic for unavailable GEFS members
             gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
             gefs_mslp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_mslp.grib2"
-            gefs_tmp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_tmp.grib2"  # NEW
+            gefs_csnow_file = f"gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}_csnow.grib2"
             gefs_path = os.path.join(BASE_DIR_AVG, "grib", gefs_file)
             gefs_mslp_path = os.path.join(BASE_DIR_AVG, "grib", gefs_mslp_file)
-            gefs_tmp_path = os.path.join(BASE_DIR_AVG, "grib", gefs_tmp_file)  # NEW
+            gefs_csnow_path = os.path.join(BASE_DIR_AVG, "grib", gefs_csnow_file)
             gefs_url = (
                 f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
                 f"&var_PRATE=on&lev_surface=on"
@@ -317,12 +316,11 @@ for step in forecast_steps:
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
             )
-            # NEW: temperature URL for GEFS member
-            gefs_tmp_url = (
-                f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
-                f"&var_TMP=on&lev_30-0_mb_above_ground=on"
+            gefs_csnow_url = (
+                f"{base_url_gefs_csnow}?file=gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}"
+                f"&var_CSNOW=on&lev_surface=on"
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
-                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
+                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2ap5"
             )
 
             # Download PRATE and MSLP if not exist
@@ -356,19 +354,19 @@ for step in forecast_steps:
                     run_date, run_hour = find_valid_run()
                     continue
 
-            # Download TMP if not exist (NEW)
-            if not os.path.exists(gefs_tmp_path):
-                print(f"Downloading GEFS member {member}, FH{step_str} TMP …")
-                r = requests.get(gefs_tmp_url, stream=True)
+            # Download CSNOW if not exist
+            if not os.path.exists(gefs_csnow_path):
+                print(f"Downloading GEFS member {member}, FH{step_str} CSNOW …")
+                r = requests.get(gefs_csnow_url, stream=True)
                 if r.status_code == 200:
-                    with open(gefs_tmp_path, 'wb') as f:
+                    with open(gefs_csnow_path, 'wb') as f:
                         for chunk in r.iter_content(1024*64):
                             if chunk:
                                 f.write(chunk)
-                    print(f"Saved GEFS TMP GRIB: {gefs_tmp_path}")
+                    print(f"Saved GEFS CSNOW GRIB: {gefs_csnow_path}")
                     time.sleep(2)
                 else:
-                    print(f"Failed to download GEFS {gefs_tmp_file}, status code: {r.status_code}")
+                    print(f"Failed to download GEFS {gefs_csnow_file}, status code: {r.status_code}")
                     run_date, run_hour = find_valid_run()
                     continue
 
@@ -390,14 +388,14 @@ for step in forecast_steps:
             print(f"Failed to open GEFS member {member} MSLP FH{step_str}: {e}")
             continue
 
-        # Open GEFS TMP (NEW)
+        # Open GEFS CSNOW
         try:
-            ds_gefs_tmp = xr.open_dataset(gefs_tmp_path, engine="cfgrib")
-            tmp_vars = [v for v in ds_gefs_tmp.data_vars if 'tmp' in v.lower()]
-            tmp_var_name = tmp_vars[0] if tmp_vars else list(ds_gefs_tmp.data_vars)[0]
-            data_gefs_tmp = ds_gefs_tmp[tmp_var_name].values
+            ds_gefs_csnow = xr.open_dataset(gefs_csnow_path, engine="cfgrib", filter_by_keys={'stepType': 'avg'})
+            csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
+            csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
+            data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
         except Exception as e:
-            print(f"Failed to open GEFS member {member} TMP FH{step_str}: {e}")
+            print(f"Failed to open GEFS member {member} CSNOW FH{step_str}: {e}")
             continue
 
         # Resize GEFS PRATE and MSLP to match GFS grid if needed
@@ -413,24 +411,21 @@ for step in forecast_steps:
         else:
             data_gefs_mslp_resized = data_gefs_mslp.squeeze()
 
-        # NEW: Resize GEFS TMP to match GFS TMP grid if needed
-        if data_gefs_tmp.shape != data_gfs_tmp.shape:
-            zoom_factors = (data_gfs_tmp.shape[0] / data_gefs_tmp.shape[0], data_gfs_tmp.shape[1] / data_gefs_tmp.shape[1])
-            data_gefs_tmp_resized = zoom(data_gefs_tmp.squeeze(), zoom_factors, order=1)
+        # Resize GEFS CSNOW to match GFS grid with nearest-neighbor interpolation.
+        if data_gefs_csnow.shape != data_gfs_csnow.shape:
+            zoom_factors = (data_gfs_csnow.shape[0] / data_gefs_csnow.shape[0], data_gfs_csnow.shape[1] / data_gefs_csnow.shape[1])
+            data_gefs_csnow_resized = zoom(data_gefs_csnow.squeeze(), zoom_factors, order=0)
         else:
-            data_gefs_tmp_resized = data_gefs_tmp.squeeze()
+            data_gefs_csnow_resized = data_gefs_csnow.squeeze()
 
         gefs_data_list.append(data_gefs_resized)
         gefs_mslp_list.append(data_gefs_mslp_resized)
-        gefs_temp_list.append(data_gefs_tmp_resized)  # NEW
+        gefs_snow_list.append(data_gefs_csnow_resized)
 
     # ---- COMPUTE FINAL AVERAGES ----
     avg_data = np.mean(gefs_data_list, axis=0)
     avg_mslp = np.mean(gefs_mslp_list, axis=0)
-    avg_temp = np.mean(gefs_temp_list, axis=0)  # NEW: ensemble mean temperature (likely Kelvin)
-
-    # Convert avg_temp from K -> F
-    avg_temp_F = (avg_temp - 273.15) * 9.0/5.0 + 32.0  # NEW
+    avg_csnow = np.mean(gefs_snow_list, axis=0)
 
     # -----------------------------
     # NEW: compute accuracy vs previous run for same VALID TIME
@@ -509,30 +504,23 @@ for step in forecast_steps:
     )
     ax.clabel(mslp_contours, fmt='%d', fontsize=6)
 
-    # NEW: Create blue colormap and snow overlay where avg_temp_F < 32°F
-    # use the user-provided discrete snow scheme
-    snow_levels = [0.10, 0.25, 0.5, 1, 2, 4, 8, 16]
+    # Create blue colormap and snow overlay where ensemble-mean CSNOW indicates snow.
+    # Use the PRATE thresholds for snow intensity and build the snow field with xarray.
     snow_colors = [
-        "#e3f2fd",  # 0.10 very light blue
-        "#bbdefb",  # 0.25 light blue
-        "#90caf9",  # 0.5 blue
-        "#42a5f5",  # 1 medium blue
-        "#1e88e5",  # 2 deeper blue
-        "#1565c0",  # 4 dark blue
-        "#0d47a1",  # 8 very dark blue
-        "#002171",  # 16 almost navy
+        "#eef7ff", "#dbeeff", "#c7e3ff", "#add6ff",
+        "#8bc4ff", "#69adf3", "#4f96e2", "#357dcb",
+        "#2666b1", "#1b508f", "#10396d", "#082449"
     ]
-    snow_cmap = LinearSegmentedColormap.from_list("snow_cbar", snow_colors, N=len(snow_colors))
-    snow_norm = BoundaryNorm(snow_levels, snow_cmap.N)
+    snow_cmap = ListedColormap(snow_colors)
+    snow_norm = BoundaryNorm(prate_levels, snow_cmap.N, clip=False)
 
-    # mask non-snow points so overlay only draws where T < 32°F
-    snow_mask = avg_temp_F < 32.0
-    snow_prate_masked = np.ma.masked_where(~snow_mask, avg_data)
+    # Keep PRATE as the plotted intensity and mask out non-snow areas with xarray.
+    snow_prate = xr.DataArray(avg_data).where(xr.DataArray(avg_csnow) >= 0.5)
 
-    # draw snow overlay on top, solid blue shades (intensity from PRATE but using snow_levels)
+    # Draw snow overlay using the same PRATE breakpoints as the rain field.
     snow_mesh = ax.contourf(
-        Lon2d, Lat2d, snow_prate_masked,
-        levels=snow_levels,
+        Lon2d, Lat2d, snow_prate.values,
+        levels=prate_levels,
         cmap=snow_cmap,
         norm=snow_norm,
         extend='max',
@@ -701,7 +689,7 @@ for step in forecast_steps:
     cb1.set_label("Average Surface PRATE (GFS + GEFS3 + GEFS12 + GEFS18) mm/hr", fontsize=7)
     cb1.ax.tick_params(labelsize=6)
     cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-    cb2.set_label("Snow (avg PRATE where T < 32°F) mm/hr", fontsize=7)
+    cb2.set_label("Snow PRATE intensity where CSNOW is present (mm/hr)", fontsize=7)
     cb2.ax.tick_params(labelsize=6)
 
     # place the main title above the plot
