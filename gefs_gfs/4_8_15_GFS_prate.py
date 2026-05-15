@@ -12,6 +12,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import time
 import gc
+import traceback
 from scipy.ndimage import zoom, gaussian_filter, minimum_filter, maximum_filter  # Add imports for filtering
 from datetime import datetime, timedelta
 import pytz  # Add this import for timezone handling
@@ -57,6 +58,25 @@ def load_processed_steps():
 def save_processed_step(step):
     with open(processed_steps_file, "a") as f:
         f.write(f"{step}\n")
+
+def cleanup_forecast_hour_gribs(step_str):
+    try:
+        deleted = []
+        for fname in os.listdir(os.path.join(BASE_DIR_AVG, "grib")):
+            if f"f{step_str}" in fname:
+                p = os.path.join(BASE_DIR_AVG, "grib", fname)
+                try:
+                    os.remove(p)
+                    deleted.append(p)
+                except Exception as ex:
+                    print(f"Failed to delete {p}: {ex}")
+        if deleted:
+            for d in deleted:
+                print(f"Deleted GRIB: {d}")
+        else:
+            print(f"No GRIB files found for FH{step_str} to delete.")
+    except Exception as e:
+        print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
 
 # -----------------------------
 # CLEAR ONLY AVG PNGs
@@ -172,6 +192,7 @@ mslp_cmap = plt.cm.viridis  # Use a perceptually uniform colormap for MSLP
 # -----------------------------
 base_url_gfs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 base_url_gefs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50b.pl"
+base_url_gefs_csnow = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl"
 gefs_members = ["04", "08", "15"]  # members to include
 
 # -----------------------------
@@ -182,16 +203,16 @@ for step in forecast_steps:
     forecast_hour = step  # Forecast hour in hours
     gefs_data_list = []
     gefs_mslp_list = []  # List to store MSLP data
-    gefs_temp_list = []  # NEW: list to store temperature arrays
+    gefs_csnow_list = []
 
     # ---- GFS ----
     while True:  # Retry logic for unavailable forecast hours
         gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
         gfs_mslp_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_mslp.grib2"
-        gfs_tmp_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_tmp.grib2"  # NEW
+        gfs_csnow_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_csnow.grib2"
         gfs_path = os.path.join(BASE_DIR_AVG, "grib", gfs_file)
         gfs_mslp_path = os.path.join(BASE_DIR_AVG, "grib", gfs_mslp_file)
-        gfs_tmp_path = os.path.join(BASE_DIR_AVG, "grib", gfs_tmp_file)  # NEW
+        gfs_csnow_path = os.path.join(BASE_DIR_AVG, "grib", gfs_csnow_file)
         gfs_url = (
             f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
             f"&var_PRATE=on&lev_surface=on"
@@ -204,10 +225,9 @@ for step in forecast_steps:
             f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
             f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
         )
-        # NEW: temperature URL (near-surface 30-0 mb above ground as requested)
-        gfs_tmp_url = (
+        gfs_csnow_url = (
             f"{base_url_gfs}?file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
-            f"&var_TMP=on&lev_30-0_mb_above_ground=on"
+            f"&var_CSNOW=on&lev_surface=on"
             f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
             f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
         )
@@ -244,19 +264,18 @@ for step in forecast_steps:
                 run_date, run_hour = find_valid_run()
                 continue
 
-        # Download TMP if not exist (NEW)
-        if not os.path.exists(gfs_tmp_path):
-            print(f"Downloading GFS FH{step_str} TMP …")
-            r = requests.get(gfs_tmp_url, stream=True)
+        if not os.path.exists(gfs_csnow_path):
+            print(f"Downloading GFS FH{step_str} CSNOW …")
+            r = requests.get(gfs_csnow_url, stream=True)
             if r.status_code == 200:
-                with open(gfs_tmp_path, 'wb') as f:
+                with open(gfs_csnow_path, 'wb') as f:
                     for chunk in r.iter_content(1024*64):
                         if chunk:
                             f.write(chunk)
-                print(f"Saved GFS TMP GRIB: {gfs_tmp_path}")
+                print(f"Saved GFS CSNOW GRIB: {gfs_csnow_path}")
                 time.sleep(2)
             else:
-                print(f"Failed to download GFS {gfs_tmp_file}, status code: {r.status_code}")
+                print(f"Failed to download GFS {gfs_csnow_file}, status code: {r.status_code}")
                 run_date, run_hour = find_valid_run()
                 continue
 
@@ -281,30 +300,33 @@ for step in forecast_steps:
         print(f"Failed to open GFS MSLP GRIB FH{step_str}: {e}")
         continue
 
-    # NEW: Open GFS TMP
+    # Open GFS CSNOW
     try:
-        ds_gfs_tmp = xr.open_dataset(gfs_tmp_path, engine="cfgrib")
-        # pick a temperature variable (prefer name containing 'tmp')
-        tmp_vars = [v for v in ds_gfs_tmp.data_vars if 'tmp' in v.lower()]
-        tmp_var_name = tmp_vars[0] if tmp_vars else list(ds_gfs_tmp.data_vars)[0]
-        data_gfs_tmp = ds_gfs_tmp[tmp_var_name].values  # likely Kelvin
+        ds_gfs_csnow = xr.open_dataset(
+            gfs_csnow_path,
+            engine="cfgrib",
+            filter_by_keys={'stepType': 'instant'}
+        )
+        csnow_vars = [v for v in ds_gfs_csnow.data_vars if 'csnow' in v.lower()]
+        csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
+        data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
     except Exception as e:
-        print(f"Failed to open GFS TMP GRIB FH{step_str}: {e}")
+        print(f"Failed to open GFS CSNOW GRIB FH{step_str}: {e}")
         continue
 
     gefs_data_list.append(data_gfs.squeeze())
     gefs_mslp_list.append(data_gfs_mslp.squeeze())
-    gefs_temp_list.append(data_gfs_tmp.squeeze())  # NEW
+    gefs_csnow_list.append(data_gfs_csnow.squeeze())
 
     # ---- GEFS MEMBERS ----
     for member in gefs_members:
         while True:  # Retry logic for unavailable GEFS members
             gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
             gefs_mslp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_mslp.grib2"
-            gefs_tmp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_tmp.grib2"  # NEW
+            gefs_csnow_file = f"gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}_csnow.grib2"
             gefs_path = os.path.join(BASE_DIR_AVG, "grib", gefs_file)
             gefs_mslp_path = os.path.join(BASE_DIR_AVG, "grib", gefs_mslp_file)
-            gefs_tmp_path = os.path.join(BASE_DIR_AVG, "grib", gefs_tmp_file)  # NEW
+            gefs_csnow_path = os.path.join(BASE_DIR_AVG, "grib", gefs_csnow_file)
             gefs_url = (
                 f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
                 f"&var_PRATE=on&lev_surface=on"
@@ -317,12 +339,11 @@ for step in forecast_steps:
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
             )
-            # NEW: temperature URL for GEFS member
-            gefs_tmp_url = (
-                f"{base_url_gefs}?file=gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}"
-                f"&var_TMP=on&lev_30-0_mb_above_ground=on"
+            gefs_csnow_url = (
+                f"{base_url_gefs_csnow}?file=gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}"
+                f"&var_CSNOW=on&lev_surface=on"
                 f"&subregion=&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
-                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2bp5"
+                f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2ap5"
             )
 
             # Download PRATE and MSLP if not exist
@@ -356,19 +377,18 @@ for step in forecast_steps:
                     run_date, run_hour = find_valid_run()
                     continue
 
-            # Download TMP if not exist (NEW)
-            if not os.path.exists(gefs_tmp_path):
-                print(f"Downloading GEFS member {member}, FH{step_str} TMP …")
-                r = requests.get(gefs_tmp_url, stream=True)
+            if not os.path.exists(gefs_csnow_path):
+                print(f"Downloading GEFS member {member}, FH{step_str} CSNOW …")
+                r = requests.get(gefs_csnow_url, stream=True)
                 if r.status_code == 200:
-                    with open(gefs_tmp_path, 'wb') as f:
+                    with open(gefs_csnow_path, 'wb') as f:
                         for chunk in r.iter_content(1024*64):
                             if chunk:
                                 f.write(chunk)
-                    print(f"Saved GEFS TMP GRIB: {gefs_tmp_path}")
+                    print(f"Saved GEFS CSNOW GRIB: {gefs_csnow_path}")
                     time.sleep(2)
                 else:
-                    print(f"Failed to download GEFS {gefs_tmp_file}, status code: {r.status_code}")
+                    print(f"Failed to download GEFS {gefs_csnow_file}, status code: {r.status_code}")
                     run_date, run_hour = find_valid_run()
                     continue
 
@@ -390,14 +410,18 @@ for step in forecast_steps:
             print(f"Failed to open GEFS member {member} MSLP FH{step_str}: {e}")
             continue
 
-        # Open GEFS TMP (NEW)
+        # Open GEFS CSNOW
         try:
-            ds_gefs_tmp = xr.open_dataset(gefs_tmp_path, engine="cfgrib")
-            tmp_vars = [v for v in ds_gefs_tmp.data_vars if 'tmp' in v.lower()]
-            tmp_var_name = tmp_vars[0] if tmp_vars else list(ds_gefs_tmp.data_vars)[0]
-            data_gefs_tmp = ds_gefs_tmp[tmp_var_name].values
+            ds_gefs_csnow = xr.open_dataset(
+                gefs_csnow_path,
+                engine="cfgrib",
+                filter_by_keys={'stepType': 'instant'}
+            )
+            csnow_vars = [v for v in ds_gefs_csnow.data_vars if 'csnow' in v.lower()]
+            csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
+            data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
         except Exception as e:
-            print(f"Failed to open GEFS member {member} TMP FH{step_str}: {e}")
+            print(f"Failed to open GEFS member {member} CSNOW FH{step_str}: {e}")
             continue
 
         # Resize GEFS PRATE and MSLP to match GFS grid if needed
@@ -413,24 +437,20 @@ for step in forecast_steps:
         else:
             data_gefs_mslp_resized = data_gefs_mslp.squeeze()
 
-        # NEW: Resize GEFS TMP to match GFS TMP grid if needed
-        if data_gefs_tmp.shape != data_gfs_tmp.shape:
-            zoom_factors = (data_gfs_tmp.shape[0] / data_gefs_tmp.shape[0], data_gfs_tmp.shape[1] / data_gefs_tmp.shape[1])
-            data_gefs_tmp_resized = zoom(data_gefs_tmp.squeeze(), zoom_factors, order=1)
+        if data_gefs_csnow.shape != data_gfs_csnow.shape:
+            zoom_factors = (data_gfs_csnow.shape[0] / data_gefs_csnow.shape[0], data_gfs_csnow.shape[1] / data_gefs_csnow.shape[1])
+            data_gefs_csnow_resized = zoom(data_gefs_csnow.squeeze(), zoom_factors, order=0)
         else:
-            data_gefs_tmp_resized = data_gefs_tmp.squeeze()
+            data_gefs_csnow_resized = data_gefs_csnow.squeeze()
 
         gefs_data_list.append(data_gefs_resized)
         gefs_mslp_list.append(data_gefs_mslp_resized)
-        gefs_temp_list.append(data_gefs_tmp_resized)  # NEW
+        gefs_csnow_list.append(data_gefs_csnow_resized)
 
     # ---- COMPUTE FINAL AVERAGES ----
     avg_data = np.mean(gefs_data_list, axis=0)
     avg_mslp = np.mean(gefs_mslp_list, axis=0)
-    avg_temp = np.mean(gefs_temp_list, axis=0)  # NEW: ensemble mean temperature (likely Kelvin)
-
-    # Convert avg_temp from K -> F
-    avg_temp_F = (avg_temp - 273.15) * 9.0/5.0 + 32.0  # NEW
+    avg_csnow = np.mean(gefs_csnow_list, axis=0)
 
     # -----------------------------
     # NEW: compute accuracy vs previous run for same VALID TIME
@@ -471,279 +491,235 @@ for step in forecast_steps:
     except Exception as e:
         print(f"Warning saving prev file {prev_file}: {e}")
 
-    # ---- PLOT PRATE AND MSLP ----
-    fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.set_extent([-130, -65, 20, 54], crs=ccrs.PlateCarree())
+    try:
+        # ---- PLOT PRATE AND MSLP ----
+        fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
+        ax = plt.axes(projection=ccrs.PlateCarree())
+        ax.set_extent([-130, -65, 20, 54], crs=ccrs.PlateCarree())
 
-    ax.add_feature(cfeature.LAND, facecolor='lightgray')
-    ax.add_feature(cfeature.OCEAN, facecolor='white')
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.add_feature(cfeature.STATES, linewidth=0.3)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3)
+        ax.add_feature(cfeature.LAND, facecolor='lightgray')
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+        ax.add_feature(cfeature.STATES, linewidth=0.3)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
+        ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3)
 
-    if lats.ndim == 1 and lons.ndim == 1:
-        Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
-    else:
-        Lon2d, Lat2d = lons_plot, lats
+        if lats.ndim == 1 and lons.ndim == 1:
+            Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
+        else:
+            Lon2d, Lat2d = lons_plot, lats
 
-    # Plot PRATE
-    mesh = ax.contourf(
-        Lon2d, Lat2d, avg_data,
-        levels=prate_levels,
-        cmap=cmap,
-        norm=norm,
-        extend='max',
-        transform=ccrs.PlateCarree()
-    )
-
-    # Plot MSLP
-    mslp_contours = ax.contour(
-        Lon2d, Lat2d, avg_mslp,
-        levels=mslp_levels,
-        colors='black',
-        linewidths=0.5,
-        transform=ccrs.PlateCarree()
-    )
-    ax.clabel(mslp_contours, fmt='%d', fontsize=6)
-
-    # NEW: Create blue colormap and snow overlay where avg_temp_F < 32°F
-    # use the user-provided discrete snow scheme
-    snow_levels = [0.10, 0.25, 0.5, 1, 2, 4, 8, 16]
-    snow_colors = [
-        "#e3f2fd",  # 0.10 very light blue
-        "#bbdefb",  # 0.25 light blue
-        "#90caf9",  # 0.5 blue
-        "#42a5f5",  # 1 medium blue
-        "#1e88e5",  # 2 deeper blue
-        "#1565c0",  # 4 dark blue
-        "#0d47a1",  # 8 very dark blue
-        "#002171",  # 16 almost navy
-    ]
-    snow_cmap = LinearSegmentedColormap.from_list("snow_cbar", snow_colors, N=len(snow_colors))
-    snow_norm = BoundaryNorm(snow_levels, snow_cmap.N)
-
-    # mask non-snow points so overlay only draws where T < 32°F
-    snow_mask = avg_temp_F < 32.0
-    snow_prate_masked = np.ma.masked_where(~snow_mask, avg_data)
-
-    # draw snow overlay on top, solid blue shades (intensity from PRATE but using snow_levels)
-    snow_mesh = ax.contourf(
-        Lon2d, Lat2d, snow_prate_masked,
-        levels=snow_levels,
-        cmap=snow_cmap,
-        norm=snow_norm,
-        extend='max',
-        transform=ccrs.PlateCarree(),
-        alpha=0.85,
-        zorder=(mesh.get_zorder() if 'mesh' in locals() else 4) + 1
-    )
-
-    # redraw key map features and MSLP contours on top so they remain visible over snow
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
-    ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue', zorder=200)
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=200)
-    # re-plot MSLP contours on top of the snow overlay so they remain visible
-    mslp_contours_top = ax.contour(
-        Lon2d, Lat2d, avg_mslp,
-        levels=mslp_levels,
-        colors='black',
-        linewidths=0.6,
-        transform=ccrs.PlateCarree(),
-        zorder=210
-    )
-    ax.clabel(mslp_contours_top, fmt='%d', fontsize=6)
-
-    # Plot lows and highs
-    def plot_lows_highs(ax, Lon2d, Lat2d, data, extent, min_distance=5, edge_buffer=2):
-        """
-        Identify and plot exactly 2 lows (minima) and 2 highs (maxima) on the map.
-        Ensure no high or low is near another, and none are near the map edges.
-        Ensure no two lows or highs are within the same contour level.
-        """
-        # Smooth the data to reduce noise
-        smoothed_data = gaussian_filter(data, sigma=3)
-
-        # Find local minima (lows) and maxima (highs)
-        local_min = minimum_filter(smoothed_data, size=10) == smoothed_data
-        local_max = maximum_filter(smoothed_data, size=10) == smoothed_data
-
-        # Extract coordinates and values for lows and highs
-        points = []
-        lon_min, lon_max, lat_min, lat_max = extent
-        for lon, lat, value, is_low in zip(
-            Lon2d[local_min | local_max].flatten(),
-            Lat2d[local_min | local_max].flatten(),
-            data[local_min | local_max].flatten(),
-            local_min[local_min | local_max].flatten()
-        ):
-            # Skip points near the edges of the map extent
-            if not (lon_min + edge_buffer <= lon <= lon_max - edge_buffer and
-                    lat_min + edge_buffer <= lat <= lat_max - edge_buffer):
-                continue
-            points.append((lon, lat, value, "L" if is_low else "H"))
-
-        # Sort lows and highs by their prominence (pressure value)
-        lows = sorted([p for p in points if p[3] == "L"], key=lambda x: x[2])  # Lowest pressure
-        highs = sorted([p for p in points if p[3] == "H"], key=lambda x: -x[2])  # Highest pressure
-
-        # Filter points to ensure no two highs or lows are too close to each other
-        def filter_points(points, min_distance):
-            filtered = []
-            for p in points:
-                if all(np.sqrt((p[0] - fp[0])**2 + (p[1] - fp[1])**2) > min_distance for fp in filtered):
-                    filtered.append(p)
-            return filtered
-
-        # Ensure lows and highs are spaced apart from each other
-        def filter_lows_highs(lows, highs, min_distance):
-            filtered_lows = []
-            filtered_highs = []
-            for low in lows:
-                if all(np.sqrt((low[0] - high[0])**2 + (low[1] - high[1])**2) > min_distance for high in highs):
-                    filtered_lows.append(low)
-            for high in highs:
-                if all(np.sqrt((high[0] - low[0])**2 + (high[1] - low[1])**2) > min_distance for low in filtered_lows):
-                    filtered_highs.append(high)
-            return filtered_lows, filtered_highs
-
-        # Ensure no two lows or highs are in the same contour level
-        def filter_same_contour(points, levels):
-            filtered = []
-            for p in points:
-                if all(abs(p[2] - fp[2]) > levels for fp in filtered):
-                    filtered.append(p)
-            return filtered
-
-        lows = filter_points(lows, min_distance)
-        highs = filter_points(highs, min_distance)
-        lows, highs = filter_lows_highs(lows, highs, min_distance)
-
-        # Filter lows and highs to ensure no two are in the same contour level
-        contour_interval = mslp_levels[1] - mslp_levels[0]
-        lows = filter_same_contour(lows, contour_interval)
-        highs = filter_same_contour(highs, contour_interval)
-
-        # FALLBACKS: pick global min/max restricted to the plotting extent (respect edge_buffer)
-        valid_mask = (
-            (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
-            (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
+        mesh = ax.contourf(
+            Lon2d, Lat2d, avg_data,
+            levels=prate_levels,
+            cmap=cmap,
+            norm=norm,
+            extend='max',
+            transform=ccrs.PlateCarree()
         )
 
-        if len(lows) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmin(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    lows.append((lon_pt, lat_pt, val, "L"))
-            except Exception:
-                pass
+        mslp_contours = ax.contour(
+            Lon2d, Lat2d, avg_mslp,
+            levels=mslp_levels,
+            colors='black',
+            linewidths=0.5,
+            transform=ccrs.PlateCarree()
+        )
+        ax.clabel(mslp_contours, fmt='%d', fontsize=6)
 
-        if len(highs) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmax(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    highs.append((lon_pt, lat_pt, val, "H"))
-            except Exception:
-                pass
+        snow_levels = [0.10, 0.25, 0.5, 1, 2, 4, 8, 16]
+        snow_colors = [
+            "#e3f2fd",
+            "#bbdefb",
+            "#90caf9",
+            "#42a5f5",
+            "#1e88e5",
+            "#1565c0",
+            "#0d47a1",
+            "#002171",
+        ]
+        snow_cmap = LinearSegmentedColormap.from_list("snow_cbar", snow_colors, N=len(snow_colors))
+        snow_norm = BoundaryNorm(snow_levels, snow_cmap.N)
 
-        # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
-        if len(lows) == 1:
-            lows += [lows[0]]
-        if len(highs) == 1:
-            highs += [highs[0]]
-        if len(lows) == 0:
-            lows = []  # nothing to plot
-        if len(highs) == 0:
-            highs = []
+        snow_threshold = 0.5
+        finite_csnow = avg_csnow[np.isfinite(avg_csnow)]
+        if finite_csnow.size and np.nanmax(finite_csnow) > 1.0:
+            snow_threshold = 50.0
 
-        lows = lows[:2]
-        highs = highs[:2]
+        snow_mask = avg_csnow >= snow_threshold
+        snow_prate_masked = np.ma.masked_where(~snow_mask, avg_data)
 
-        # Plot lows and highs with pressure values (ensure they are topmost)
-        for lon, lat, value, label in lows + highs:
-            color = "red" if label == "L" else "blue"
-            # main label (L/H)
-            txt_main = ax.text(
-                lon, lat, label, color=color, fontsize=12, fontweight="bold",
-                ha="center", va="center", transform=ccrs.PlateCarree(),
-                zorder=400, clip_on=False
+        snow_mesh = ax.contourf(
+            Lon2d, Lat2d, snow_prate_masked,
+            levels=snow_levels,
+            cmap=snow_cmap,
+            norm=snow_norm,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            alpha=0.85,
+            zorder=(mesh.get_zorder() if 'mesh' in locals() else 4) + 1
+        )
+
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
+        ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue', zorder=200)
+        ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=200)
+        mslp_contours_top = ax.contour(
+            Lon2d, Lat2d, avg_mslp,
+            levels=mslp_levels,
+            colors='black',
+            linewidths=0.6,
+            transform=ccrs.PlateCarree(),
+            zorder=210
+        )
+        ax.clabel(mslp_contours_top, fmt='%d', fontsize=6)
+
+        def plot_lows_highs(ax, Lon2d, Lat2d, data, extent, min_distance=5, edge_buffer=2):
+            smoothed_data = gaussian_filter(data, sigma=3)
+            local_min = minimum_filter(smoothed_data, size=10) == smoothed_data
+            local_max = maximum_filter(smoothed_data, size=10) == smoothed_data
+
+            points = []
+            lon_min, lon_max, lat_min, lat_max = extent
+            for lon, lat, value, is_low in zip(
+                Lon2d[local_min | local_max].flatten(),
+                Lat2d[local_min | local_max].flatten(),
+                data[local_min | local_max].flatten(),
+                local_min[local_min | local_max].flatten()
+            ):
+                if not (lon_min + edge_buffer <= lon <= lon_max - edge_buffer and
+                        lat_min + edge_buffer <= lat <= lat_max - edge_buffer):
+                    continue
+                points.append((lon, lat, value, "L" if is_low else "H"))
+
+            lows = sorted([p for p in points if p[3] == "L"], key=lambda x: x[2])
+            highs = sorted([p for p in points if p[3] == "H"], key=lambda x: -x[2])
+
+            def filter_points(points, min_distance):
+                filtered = []
+                for p in points:
+                    if all(np.sqrt((p[0] - fp[0])**2 + (p[1] - fp[1])**2) > min_distance for fp in filtered):
+                        filtered.append(p)
+                return filtered
+
+            def filter_lows_highs(lows, highs, min_distance):
+                filtered_lows = []
+                filtered_highs = []
+                for low in lows:
+                    if all(np.sqrt((low[0] - high[0])**2 + (low[1] - high[1])**2) > min_distance for high in highs):
+                        filtered_lows.append(low)
+                for high in highs:
+                    if all(np.sqrt((high[0] - low[0])**2 + (high[1] - low[1])**2) > min_distance for low in filtered_lows):
+                        filtered_highs.append(high)
+                return filtered_lows, filtered_highs
+
+            def filter_same_contour(points, levels):
+                filtered = []
+                for p in points:
+                    if all(abs(p[2] - fp[2]) > levels for fp in filtered):
+                        filtered.append(p)
+                return filtered
+
+            lows = filter_points(lows, min_distance)
+            highs = filter_points(highs, min_distance)
+            lows, highs = filter_lows_highs(lows, highs, min_distance)
+
+            contour_interval = mslp_levels[1] - mslp_levels[0]
+            lows = filter_same_contour(lows, contour_interval)
+            highs = filter_same_contour(highs, contour_interval)
+
+            valid_mask = (
+                (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
+                (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
             )
-            # add white stroke so text remains readable over contours/overlays
-            txt_main.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
 
-            # numeric pressure below the label
-            txt_val = ax.text(
-                lon, lat - 1, f"{value:.0f}", color=color, fontsize=6, fontweight="bold",
-                ha="center", va="center", transform=ccrs.PlateCarree(),
-                zorder=400, clip_on=False
-            )
-            txt_val.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
-
-    plot_lows_highs(ax, Lon2d, Lat2d, avg_mslp, extent=[-130, -65, 20, 54])
-
-    # place both horizontal colorbars way up near the top of the figure
-    # [left, bottom, width, height] in figure fraction
-    cbar_left = 0.12  # shifted right from 0.06 -> 0.12
-    cbar_bottom = 0.10   # move bars up near the top
-    cbar_width = 0.38
-    cbar_height = 0.018  # compact height
-    cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
-    cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-    cb1.set_label("Average Surface PRATE (GFS + GEFS4 + GEFS8 + GEFS15) mm/hr", fontsize=7)
-    cb1.ax.tick_params(labelsize=6)
-    cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-    cb2.set_label("Snow (avg PRATE where T < 32°F) mm/hr", fontsize=7)
-    cb2.ax.tick_params(labelsize=6)
-
-    # place the main title above the plot
-    forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
-    accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
-    fig.suptitle(
-        f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
-        fontsize=8,
-        fontweight='bold',
-        y=0.80
-    )
-    # adjust axes so the map has room above/below the title
-    plt.subplots_adjust(top=0.84)
-
-    png_path = os.path.join(BASE_DIR_AVG, "png", f"4_8_15_prate_mslp_avg_{step_str}.png")
-    plt.savefig(png_path, bbox_inches='tight', dpi=300)
-    plt.close(fig)
-    print(f"Saved final AVG PNG FH{step_str}: {png_path}")
-
-    # mark this step as processed
-    save_processed_step(step_str)
-
-    # remove any grib files for this forecast hour to avoid accumulation
-    try:
-        deleted = []
-        for fname in os.listdir(os.path.join(BASE_DIR_AVG, "grib")):
-            if f"f{step_str}" in fname:
-                p = os.path.join(BASE_DIR_AVG, "grib", fname)
+            if len(lows) == 0:
                 try:
-                    os.remove(p)
-                    deleted.append(p)
-                except Exception as ex:
-                    print(f"Failed to delete {p}: {ex}")
-        if deleted:
-            for d in deleted:
-                print(f"Deleted GRIB: {d}")
-        else:
-            print(f"No GRIB files found for FH{step_str} to delete.")
-    except Exception as e:
-        print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
+                    masked = np.where(valid_mask, smoothed_data, np.nan)
+                    if not np.all(np.isnan(masked)):
+                        idx = np.unravel_index(np.nanargmin(masked), masked.shape)
+                        lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                        lows.append((lon_pt, lat_pt, val, "L"))
+                except Exception:
+                    pass
 
-    gc.collect()
-    time.sleep(1)
+            if len(highs) == 0:
+                try:
+                    masked = np.where(valid_mask, smoothed_data, np.nan)
+                    if not np.all(np.isnan(masked)):
+                        idx = np.unravel_index(np.nanargmax(masked), masked.shape)
+                        lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                        highs.append((lon_pt, lat_pt, val, "H"))
+                except Exception:
+                    pass
+
+            if len(lows) == 1:
+                lows += [lows[0]]
+            if len(highs) == 1:
+                highs += [highs[0]]
+            if len(lows) == 0:
+                lows = []
+            if len(highs) == 0:
+                highs = []
+
+            lows = lows[:2]
+            highs = highs[:2]
+
+            for lon, lat, value, label in lows + highs:
+                color = "red" if label == "L" else "blue"
+                txt_main = ax.text(
+                    lon, lat, label, color=color, fontsize=12, fontweight="bold",
+                    ha="center", va="center", transform=ccrs.PlateCarree(),
+                    zorder=400, clip_on=False
+                )
+                txt_main.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
+
+                txt_val = ax.text(
+                    lon, lat - 1, f"{value:.0f}", color=color, fontsize=6, fontweight="bold",
+                    ha="center", va="center", transform=ccrs.PlateCarree(),
+                    zorder=400, clip_on=False
+                )
+                txt_val.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
+
+        plot_lows_highs(ax, Lon2d, Lat2d, avg_mslp, extent=[-130, -65, 20, 54])
+
+        cbar_left = 0.12
+        cbar_bottom = 0.10
+        cbar_width = 0.38
+        cbar_height = 0.018
+        cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+        cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
+        cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
+        cb1.set_label("Average Surface PRATE (GFS + GEFS4 + GEFS8 + GEFS15) mm/hr", fontsize=7)
+        cb1.ax.tick_params(labelsize=6)
+        cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
+        cb2.set_label("Snow (avg PRATE where CSNOW indicates snow) mm/hr", fontsize=7)
+        cb2.ax.tick_params(labelsize=6)
+
+        forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
+        accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
+        fig.suptitle(
+            f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
+            fontsize=8,
+            fontweight='bold',
+            y=0.80
+        )
+        plt.subplots_adjust(top=0.84)
+
+        png_path = os.path.join(BASE_DIR_AVG, "png", f"4_8_15_prate_mslp_avg_{step_str}.png")
+        plt.savefig(png_path, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+        print(f"Saved final AVG PNG FH{step_str}: {png_path}")
+        save_processed_step(step_str)
+    except Exception as e:
+        print(f"Skipping plot/save for FH{step_str} due to error: {e}")
+        traceback.print_exc()
+        plt.close('all')
+    finally:
+        cleanup_forecast_hour_gribs(step_str)
+        gc.collect()
+        time.sleep(1)
 
 print("All GFS + GEFS4 + GEFS8 + GEFS15 averages downloaded and plotted in AVG_PRATE!")
