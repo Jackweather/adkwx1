@@ -1,5 +1,5 @@
 from flask import Flask, render_template, send_from_directory, abort
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import os
 import subprocess
 import threading
@@ -86,21 +86,43 @@ def run_task1():
                 return script, e, traceback.format_exc()
 
         with ThreadPoolExecutor(max_workers=2) as executor:
-            futures = [executor.submit(run_script, script, cwd) for script, cwd in scripts]
-            for future in as_completed(futures):
-                script, result, error_trace = future.result()
-                if error_trace:
-                    print(f"Error running {os.path.basename(script)}:\n{error_trace}")
-                    print("STDOUT:", result.stdout)
-                    print("STDERR:", result.stderr)
-                else:
-                    print(f"{os.path.basename(script)} ran successfully!")
-                    print("STDOUT:", result.stdout)
-                    print("STDERR:", result.stderr)
+            script_iter = iter(scripts)
+            active_futures = {}
+
+            for _ in range(2):
+                try:
+                    script, cwd = next(script_iter)
+                except StopIteration:
+                    break
+                active_futures[executor.submit(run_script, script, cwd)] = script
+
+            while active_futures:
+                done, _ = wait(active_futures, return_when=FIRST_COMPLETED)
+                for future in done:
+                    script, result, error_trace = future.result()
+                    active_futures.pop(future, None)
+
+                    if error_trace:
+                        print(f"Error running {os.path.basename(script)}:\n{error_trace}")
+                        print("STDOUT:", result.stdout)
+                        print("STDERR:", result.stderr)
+                    else:
+                        print(f"{os.path.basename(script)} ran successfully!")
+                        print("STDOUT:", result.stdout)
+                        print("STDERR:", result.stderr)
+
+                    try:
+                        next_script, next_cwd = next(script_iter)
+                    except StopIteration:
+                        continue
+
+                    active_futures[executor.submit(run_script, next_script, next_cwd)] = next_script
+
+        print("All queued scripts finished. Background task ending.")
 
     # Run the task in a separate thread
     threading.Thread(target=run_all_scripts).start()
-    return "Task started in background! Check logs folder for output.", 200
+    return "Task started in background. It will stop after each queued script runs once.", 200
 
 if __name__ == '__main__':
     app.run(debug=True)
