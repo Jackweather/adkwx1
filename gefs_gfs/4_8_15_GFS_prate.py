@@ -458,7 +458,7 @@ for step in forecast_steps:
     ax.add_feature(cfeature.BORDERS, linewidth=0.5)
     ax.add_feature(cfeature.STATES, linewidth=0.3)
     ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3)
+    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=0)
 
     if lats.ndim == 1 and lons.ndim == 1:
         Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
@@ -472,7 +472,8 @@ for step in forecast_steps:
         cmap=cmap,
         norm=norm,
         extend='max',
-        transform=ccrs.PlateCarree()
+        transform=ccrs.PlateCarree(),
+        zorder=50
     )
 
     # Plot MSLP
@@ -507,7 +508,7 @@ for step in forecast_steps:
         extend='max',
         transform=ccrs.PlateCarree(),
         alpha=0.85,
-        zorder=(mesh.get_zorder() if 'mesh' in locals() else 4) + 1
+        zorder=(mesh.get_zorder() if 'mesh' in locals() else 50) + 1
     )
 
     # redraw key map features and MSLP contours on top so they remain visible over snow
@@ -515,7 +516,6 @@ for step in forecast_steps:
     ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
     ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
     ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue', zorder=200)
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=200)
     # re-plot MSLP contours on top of the snow overlay so they remain visible
     mslp_contours_top = ax.contour(
         Lon2d, Lat2d, avg_mslp,
