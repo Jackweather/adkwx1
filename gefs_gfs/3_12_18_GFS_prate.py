@@ -477,7 +477,7 @@ for step in forecast_steps:
     ax.add_feature(cfeature.BORDERS, linewidth=0.5)
     ax.add_feature(cfeature.STATES, linewidth=0.3)
     ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3)
+    ax.add_feature(cfeature.LAKES, facecolor='none', edgecolor='blue', linewidth=0.3)
 
     if lats.ndim == 1 and lons.ndim == 1:
         Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
