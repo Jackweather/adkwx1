@@ -16,6 +16,7 @@ from scipy.ndimage import zoom, gaussian_filter, minimum_filter, maximum_filter 
 from datetime import datetime, timedelta
 from pathlib import Path
 import pytz  # Add this import for timezone handling
+from mrms_verification import archive_forecast_window
 
 
 BASE_DIR = Path('/var/data')
@@ -491,6 +492,24 @@ for step in forecast_steps:
         except Exception as e:
             print(f"Warning saving prev file {prev_file}: {e}")
 
+        try:
+            six_hour_archive, twenty_four_hour_archive = archive_forecast_window(
+                base_dir=BASE_DIR_AVG,
+                model_key="3_12_18",
+                run_date=run_date,
+                run_hour=run_hour,
+                forecast_hour=forecast_hour,
+                step_str=step_str,
+                avg_data=avg_data,
+                lats=lats,
+                lons=lons_plot,
+            )
+            print(f"Archived 6-hour forecast for MRMS verification: {six_hour_archive}")
+            if twenty_four_hour_archive is not None:
+                print(f"Archived 24-hour forecast for MRMS verification: {twenty_four_hour_archive}")
+        except Exception as e:
+            print(f"Warning archiving forecast for MRMS verification FH{step_str}: {e}")
+
         # ---- PLOT PRATE AND MSLP ----
         fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
         ax = plt.axes(projection=ccrs.PlateCarree())
@@ -719,7 +738,7 @@ for step in forecast_steps:
 
         # place the main title above the plot
         forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
-        accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
+        accuracy_str = f" | Prior run agreement: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Prior run agreement: N/A"
         fig.suptitle(
             f"plot3 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
             fontsize=8,
