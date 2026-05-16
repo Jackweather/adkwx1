@@ -174,6 +174,34 @@ base_url_gfs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 base_url_gefs = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50b.pl"
 base_url_gefs_csnow = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gefs_atmos_0p50a.pl"
 gefs_members = ["03", "12", "18"]  # members to include
+MAX_DOWNLOAD_RETRIES = 3
+
+
+def skip_forecast_hour(step_str, reason):
+    print(f"Skipping forecast hour FH{step_str}: {reason}")
+
+
+def download_grib(url, path, label):
+    if os.path.exists(path):
+        return True, None
+
+    print(f"Downloading {label} ...")
+    try:
+        response = requests.get(url, stream=True, timeout=60)
+    except requests.RequestException as exc:
+        return False, exc
+
+    if response.status_code != 200:
+        return False, f"status code {response.status_code}"
+
+    with open(path, 'wb') as f:
+        for chunk in response.iter_content(1024 * 64):
+            if chunk:
+                f.write(chunk)
+
+    print(f"Saved GRIB: {path}")
+    time.sleep(2)
+    return True, None
 
 # -----------------------------
 # PROCESS FORECAST HOURS
@@ -184,9 +212,10 @@ for step in forecast_steps:
     gefs_data_list = []
     gefs_mslp_list = []  # List to store MSLP data
     gefs_snow_list = []  # List to store CSNOW masks
+    step_failed = False
 
     # ---- GFS ----
-    while True:  # Retry logic for unavailable forecast hours
+    for attempt in range(1, MAX_DOWNLOAD_RETRIES + 1):
         gfs_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_prate.grib2"
         gfs_mslp_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_mslp.grib2"
         gfs_csnow_file = f"gfs.t{run_hour}z.pgrb2.0p25.f{step_str}_csnow.grib2"
@@ -212,55 +241,42 @@ for step in forecast_steps:
             f"&dir=%2Fgfs.{run_date}%2F{run_hour}%2Fatmos"
         )
 
-        # Download PRATE if not exist
-        if not os.path.exists(gfs_path):
-            print(f"Downloading GFS FH{step_str} PRATE …")
-            r = requests.get(gfs_url, stream=True)
-            if r.status_code == 200:
-                with open(gfs_path, 'wb') as f:
-                    for chunk in r.iter_content(1024*64):
-                        if chunk:
-                            f.write(chunk)
-                print(f"Saved GFS GRIB: {gfs_path}")
-                time.sleep(2)
-            else:
-                print(f"Failed to download GFS {gfs_file}, status code: {r.status_code}")
-                run_date, run_hour = find_valid_run()
-                continue
+        ok, error = download_grib(gfs_url, gfs_path, f"GFS FH{step_str} PRATE")
+        if not ok:
+            if attempt == MAX_DOWNLOAD_RETRIES:
+                skip_forecast_hour(step_str, f"failed to download {gfs_file}: {error}")
+                step_failed = True
+                break
+            print(f"Retrying GFS {gfs_file} after download error: {error}")
+            run_date, run_hour = find_valid_run()
+            continue
 
-        # Download MSLP if not exist
-        if not os.path.exists(gfs_mslp_path):
-            print(f"Downloading GFS FH{step_str} MSLP …")
-            r = requests.get(gfs_mslp_url, stream=True)
-            if r.status_code == 200:
-                with open(gfs_mslp_path, 'wb') as f:
-                    for chunk in r.iter_content(1024*64):
-                        if chunk:
-                            f.write(chunk)
-                print(f"Saved GFS GRIB: {gfs_mslp_path}")
-                time.sleep(2)
-            else:
-                print(f"Failed to download GFS {gfs_mslp_file}, status code: {r.status_code}")
-                run_date, run_hour = find_valid_run()
-                continue
+        ok, error = download_grib(gfs_mslp_url, gfs_mslp_path, f"GFS FH{step_str} MSLP")
+        if not ok:
+            if attempt == MAX_DOWNLOAD_RETRIES:
+                skip_forecast_hour(step_str, f"failed to download {gfs_mslp_file}: {error}")
+                step_failed = True
+                break
+            print(f"Retrying GFS {gfs_mslp_file} after download error: {error}")
+            run_date, run_hour = find_valid_run()
+            continue
 
-        # Download CSNOW if not exist
-        if not os.path.exists(gfs_csnow_path):
-            print(f"Downloading GFS FH{step_str} CSNOW …")
-            r = requests.get(gfs_csnow_url, stream=True)
-            if r.status_code == 200:
-                with open(gfs_csnow_path, 'wb') as f:
-                    for chunk in r.iter_content(1024*64):
-                        if chunk:
-                            f.write(chunk)
-                print(f"Saved GFS CSNOW GRIB: {gfs_csnow_path}")
-                time.sleep(2)
-            else:
-                print(f"Failed to download GFS {gfs_csnow_file}, status code: {r.status_code}")
-                run_date, run_hour = find_valid_run()
-                continue
+        ok, error = download_grib(gfs_csnow_url, gfs_csnow_path, f"GFS FH{step_str} CSNOW")
+        if not ok:
+            if attempt == MAX_DOWNLOAD_RETRIES:
+                skip_forecast_hour(step_str, f"failed to download {gfs_csnow_file}: {error}")
+                step_failed = True
+                break
+            print(f"Retrying GFS {gfs_csnow_file} after download error: {error}")
+            run_date, run_hour = find_valid_run()
+            continue
 
         break
+
+    if step_failed:
+        gc.collect()
+        time.sleep(1)
+        continue
 
     # Open GFS PRATE
     try:
@@ -297,7 +313,7 @@ for step in forecast_steps:
 
     # ---- GEFS MEMBERS ----
     for member in gefs_members:
-        while True:  # Retry logic for unavailable GEFS members
+        for attempt in range(1, MAX_DOWNLOAD_RETRIES + 1):
             gefs_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_prate.grib2"
             gefs_mslp_file = f"gep{member}.t{run_hour}z.pgrb2b.0p50.f{step_str}_mslp.grib2"
             gefs_csnow_file = f"gep{member}.t{run_hour}z.pgrb2a.0p50.f{step_str}_csnow.grib2"
@@ -323,54 +339,45 @@ for step in forecast_steps:
                 f"&dir=%2Fgefs.{run_date}%2F{run_hour}%2Fatmos%2Fpgrb2ap5"
             )
 
-            # Download PRATE and MSLP if not exist
-            if not os.path.exists(gefs_path):
-                print(f"Downloading GEFS member {member}, FH{step_str} PRATE …")
-                r = requests.get(gefs_url, stream=True)
-                if r.status_code == 200:
-                    with open(gefs_path, 'wb') as f:
-                        for chunk in r.iter_content(1024*64):
-                            if chunk:
-                                f.write(chunk)
-                    print(f"Saved GEFS GRIB: {gefs_path}")
-                    time.sleep(2)
-                else:
-                    print(f"Failed to download GEFS {gefs_file}, status code: {r.status_code}")
-                    run_date, run_hour = find_valid_run()
-                    continue
+            ok, error = download_grib(gefs_url, gefs_path, f"GEFS member {member}, FH{step_str} PRATE")
+            if not ok:
+                if attempt == MAX_DOWNLOAD_RETRIES:
+                    skip_forecast_hour(step_str, f"failed to download {gefs_file}: {error}")
+                    step_failed = True
+                    break
+                print(f"Retrying GEFS {gefs_file} after download error: {error}")
+                run_date, run_hour = find_valid_run()
+                continue
 
-            if not os.path.exists(gefs_mslp_path):
-                print(f"Downloading GEFS member {member}, FH{step_str} MSLP …")
-                r = requests.get(gefs_mslp_url, stream=True)
-                if r.status_code == 200:
-                    with open(gefs_mslp_path, 'wb') as f:
-                        for chunk in r.iter_content(1024*64):
-                            if chunk:
-                                f.write(chunk)
-                    print(f"Saved GEFS GRIB: {gefs_mslp_path}")
-                    time.sleep(2)
-                else:
-                    print(f"Failed to download GEFS {gefs_mslp_file}, status code: {r.status_code}")
-                    run_date, run_hour = find_valid_run()
-                    continue
+            ok, error = download_grib(gefs_mslp_url, gefs_mslp_path, f"GEFS member {member}, FH{step_str} MSLP")
+            if not ok:
+                if attempt == MAX_DOWNLOAD_RETRIES:
+                    skip_forecast_hour(step_str, f"failed to download {gefs_mslp_file}: {error}")
+                    step_failed = True
+                    break
+                print(f"Retrying GEFS {gefs_mslp_file} after download error: {error}")
+                run_date, run_hour = find_valid_run()
+                continue
 
-            # Download CSNOW if not exist
-            if not os.path.exists(gefs_csnow_path):
-                print(f"Downloading GEFS member {member}, FH{step_str} CSNOW …")
-                r = requests.get(gefs_csnow_url, stream=True)
-                if r.status_code == 200:
-                    with open(gefs_csnow_path, 'wb') as f:
-                        for chunk in r.iter_content(1024*64):
-                            if chunk:
-                                f.write(chunk)
-                    print(f"Saved GEFS CSNOW GRIB: {gefs_csnow_path}")
-                    time.sleep(2)
-                else:
-                    print(f"Failed to download GEFS {gefs_csnow_file}, status code: {r.status_code}")
-                    run_date, run_hour = find_valid_run()
-                    continue
+            ok, error = download_grib(gefs_csnow_url, gefs_csnow_path, f"GEFS member {member}, FH{step_str} CSNOW")
+            if not ok:
+                if attempt == MAX_DOWNLOAD_RETRIES:
+                    skip_forecast_hour(step_str, f"failed to download {gefs_csnow_file}: {error}")
+                    step_failed = True
+                    break
+                print(f"Retrying GEFS {gefs_csnow_file} after download error: {error}")
+                run_date, run_hour = find_valid_run()
+                continue
 
             break
+
+        if step_failed:
+            break
+
+    if step_failed:
+        gc.collect()
+        time.sleep(1)
+        continue
 
         # Open GEFS PRATE
         try:
@@ -422,314 +429,321 @@ for step in forecast_steps:
         gefs_mslp_list.append(data_gefs_mslp_resized)
         gefs_snow_list.append(data_gefs_csnow_resized)
 
-    # ---- COMPUTE FINAL AVERAGES ----
-    avg_data = np.mean(gefs_data_list, axis=0)
-    avg_mslp = np.mean(gefs_mslp_list, axis=0)
-    avg_csnow = np.mean(gefs_snow_list, axis=0)
-
-    # -----------------------------
-    # NEW: compute accuracy vs previous run for same VALID TIME
-    # -----------------------------
-    # compute run datetime (UTC) and valid datetime for this forecast
-    run_datetime_utc = datetime.strptime(f"{run_date} {run_hour}", "%Y%m%d %H")
-    valid_dt = run_datetime_utc + timedelta(hours=forecast_hour)
-    valid_tag = valid_dt.strftime("%Y%m%d_%H")  # e.g. 20240203_18 (UTC valid time)
-    prev_file = os.path.join(prev_dir, f"avg_prate_valid_{valid_tag}.npy")
-
-    accuracy_pct = None
     try:
-        if os.path.exists(prev_file):
-            prev_data = np.load(prev_file)
-            # resize previous to current if needed
-            if prev_data.shape != avg_data.shape:
-                zoom_factors = (avg_data.shape[0] / prev_data.shape[0], avg_data.shape[1] / prev_data.shape[1])
-                prev_resized = zoom(prev_data, zoom_factors, order=1)
-            else:
-                prev_resized = prev_data
-            # mask NaNs and compute MAE relative to previous magnitude
-            mask = ~np.isnan(avg_data) & ~np.isnan(prev_resized)
-            if np.any(mask):
-                mae = np.mean(np.abs(avg_data[mask] - prev_resized[mask]))
-                mean_prev = np.mean(np.abs(prev_resized[mask]))
-                accuracy_pct = max(0.0, min(100.0, 100.0 * (1.0 - mae / (mean_prev + 1e-6))))
+        # ---- COMPUTE FINAL AVERAGES ----
+        avg_data = np.mean(gefs_data_list, axis=0)
+        avg_mslp = np.mean(gefs_mslp_list, axis=0)
+        avg_csnow = np.mean(gefs_snow_list, axis=0)
+
+        # -----------------------------
+        # NEW: compute accuracy vs previous run for same VALID TIME
+        # -----------------------------
+        # compute run datetime (UTC) and valid datetime for this forecast
+        run_datetime_utc = datetime.strptime(f"{run_date} {run_hour}", "%Y%m%d %H")
+        valid_dt = run_datetime_utc + timedelta(hours=forecast_hour)
+        valid_tag = valid_dt.strftime("%Y%m%d_%H")  # e.g. 20240203_18 (UTC valid time)
+        prev_file = os.path.join(prev_dir, f"avg_prate_valid_{valid_tag}.npy")
+
+        accuracy_pct = None
+        try:
+            if os.path.exists(prev_file):
+                prev_data = np.load(prev_file)
+                # resize previous to current if needed
+                if prev_data.shape != avg_data.shape:
+                    zoom_factors = (avg_data.shape[0] / prev_data.shape[0], avg_data.shape[1] / prev_data.shape[1])
+                    prev_resized = zoom(prev_data, zoom_factors, order=1)
+                else:
+                    prev_resized = prev_data
+                # mask NaNs and compute MAE relative to previous magnitude
+                mask = ~np.isnan(avg_data) & ~np.isnan(prev_resized)
+                if np.any(mask):
+                    mae = np.mean(np.abs(avg_data[mask] - prev_resized[mask]))
+                    mean_prev = np.mean(np.abs(prev_resized[mask]))
+                    accuracy_pct = max(0.0, min(100.0, 100.0 * (1.0 - mae / (mean_prev + 1e-6))))
+                else:
+                    accuracy_pct = None
             else:
                 accuracy_pct = None
-        else:
+        except Exception as e:
+            print(f"Warning computing accuracy for FH{step_str}: {e}")
             accuracy_pct = None
-    except Exception as e:
-        print(f"Warning computing accuracy for FH{step_str}: {e}")
-        accuracy_pct = None
 
-    # save this run's avg for next run comparison (overwrite)
-    try:
-        np.save(prev_file, avg_data)
-    except Exception as e:
-        print(f"Warning saving prev file {prev_file}: {e}")
+        # save this run's avg for next run comparison (overwrite)
+        try:
+            np.save(prev_file, avg_data)
+        except Exception as e:
+            print(f"Warning saving prev file {prev_file}: {e}")
 
-    # ---- PLOT PRATE AND MSLP ----
-    fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.set_extent([-130, -65, 20, 54], crs=ccrs.PlateCarree())
+        # ---- PLOT PRATE AND MSLP ----
+        fig = plt.figure(figsize=(10, 7), dpi=300, facecolor='white')
+        ax = plt.axes(projection=ccrs.PlateCarree())
+        ax.set_extent([-130, -65, 20, 54], crs=ccrs.PlateCarree())
 
-    ax.add_feature(cfeature.LAND, facecolor='lightgray')
-    ax.add_feature(cfeature.OCEAN, facecolor='white')
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.add_feature(cfeature.STATES, linewidth=0.3)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
-    ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=0)
+        ax.add_feature(cfeature.LAND, facecolor='lightgray')
+        ax.add_feature(cfeature.OCEAN, facecolor='white')
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+        ax.add_feature(cfeature.STATES, linewidth=0.3)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue')
+        ax.add_feature(cfeature.LAKES, facecolor='lightblue', edgecolor='blue', linewidth=0.3, zorder=0)
 
-    if lats.ndim == 1 and lons.ndim == 1:
-        Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
-    else:
-        Lon2d, Lat2d = lons_plot, lats
+        if lats.ndim == 1 and lons.ndim == 1:
+            Lon2d, Lat2d = np.meshgrid(lons_plot, lats)
+        else:
+            Lon2d, Lat2d = lons_plot, lats
 
-    # Plot PRATE
-    mesh = ax.contourf(
-        Lon2d, Lat2d, avg_data,
-        levels=prate_levels,
-        cmap=cmap,
-        norm=norm,
-        extend='max',
-        transform=ccrs.PlateCarree(),
-        zorder=50
-    )
-
-    # Plot MSLP
-    mslp_contours = ax.contour(
-        Lon2d, Lat2d, avg_mslp,
-        levels=mslp_levels,
-        colors='black',
-        linewidths=0.5,
-        transform=ccrs.PlateCarree()
-    )
-    ax.clabel(mslp_contours, fmt='%d', fontsize=6)
-
-    # Create blue colormap and snow overlay where ensemble-mean CSNOW indicates snow.
-    # Use the PRATE thresholds for snow intensity and build the snow field with xarray.
-    snow_colors = [
-        "#eef7ff", "#dbeeff", "#c7e3ff", "#add6ff",
-        "#8bc4ff", "#69adf3", "#4f96e2", "#357dcb",
-        "#2666b1", "#1b508f", "#10396d", "#082449"
-    ]
-    snow_cmap = ListedColormap(snow_colors)
-    snow_norm = BoundaryNorm(prate_levels, snow_cmap.N, clip=False)
-
-    # Keep PRATE as the plotted intensity and mask out non-snow areas with xarray.
-    snow_prate = xr.DataArray(avg_data).where(xr.DataArray(avg_csnow) >= 0.5)
-
-    # Draw snow overlay using the same PRATE breakpoints as the rain field.
-    snow_mesh = ax.contourf(
-        Lon2d, Lat2d, snow_prate.values,
-        levels=prate_levels,
-        cmap=snow_cmap,
-        norm=snow_norm,
-        extend='max',
-        transform=ccrs.PlateCarree(),
-        alpha=0.85,
-        zorder=(mesh.get_zorder() if 'mesh' in locals() else 50) + 1
-    )
-
-    # redraw key map features and MSLP contours on top so they remain visible over snow
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
-    ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue', zorder=200)
-    # re-plot MSLP contours on top of the snow overlay so they remain visible
-    mslp_contours_top = ax.contour(
-        Lon2d, Lat2d, avg_mslp,
-        levels=mslp_levels,
-        colors='black',
-        linewidths=0.6,
-        transform=ccrs.PlateCarree(),
-        zorder=210
-    )
-    ax.clabel(mslp_contours_top, fmt='%d', fontsize=6)
-
-    # Plot lows and highs
-    def plot_lows_highs(ax, Lon2d, Lat2d, data, extent, min_distance=5, edge_buffer=2):
-        """
-        Identify and plot exactly 2 lows (minima) and 2 highs (maxima) on the map.
-        Ensure no high or low is near another, and none are near the map edges.
-        Ensure no two lows or highs are within the same contour level.
-        """
-        # Smooth the data to reduce noise
-        smoothed_data = gaussian_filter(data, sigma=3)
-
-        # Find local minima (lows) and maxima (highs)
-        local_min = minimum_filter(smoothed_data, size=10) == smoothed_data
-        local_max = maximum_filter(smoothed_data, size=10) == smoothed_data
-
-        # Extract coordinates and values for lows and highs
-        points = []
-        lon_min, lon_max, lat_min, lat_max = extent
-        for lon, lat, value, is_low in zip(
-            Lon2d[local_min | local_max].flatten(),
-            Lat2d[local_min | local_max].flatten(),
-            data[local_min | local_max].flatten(),
-            local_min[local_min | local_max].flatten()
-        ):
-            # Skip points near the edges of the map extent
-            if not (lon_min + edge_buffer <= lon <= lon_max - edge_buffer and
-                    lat_min + edge_buffer <= lat <= lat_max - edge_buffer):
-                continue
-            points.append((lon, lat, value, "L" if is_low else "H"))
-
-        # Sort lows and highs by their prominence (pressure value)
-        lows = sorted([p for p in points if p[3] == "L"], key=lambda x: x[2])  # Lowest pressure
-        highs = sorted([p for p in points if p[3] == "H"], key=lambda x: -x[2])  # Highest pressure
-
-        # Filter points to ensure no two highs or lows are too close to each other
-        def filter_points(points, min_distance):
-            filtered = []
-            for p in points:
-                if all(np.sqrt((p[0] - fp[0])**2 + (p[1] - fp[1])**2) > min_distance for fp in filtered):
-                    filtered.append(p)
-            return filtered
-
-        # Ensure lows and highs are spaced apart from each other
-        def filter_lows_highs(lows, highs, min_distance):
-            filtered_lows = []
-            filtered_highs = []
-            for low in lows:
-                if all(np.sqrt((low[0] - high[0])**2 + (low[1] - high[1])**2) > min_distance for high in highs):
-                    filtered_lows.append(low)
-            for high in highs:
-                if all(np.sqrt((high[0] - low[0])**2 + (high[1] - low[1])**2) > min_distance for low in filtered_lows):
-                    filtered_highs.append(high)
-            return filtered_lows, filtered_highs
-
-        # Ensure no two lows or highs are in the same contour level
-        def filter_same_contour(points, levels):
-            filtered = []
-            for p in points:
-                if all(abs(p[2] - fp[2]) > levels for fp in filtered):
-                    filtered.append(p)
-            return filtered
-
-        lows = filter_points(lows, min_distance)
-        highs = filter_points(highs, min_distance)
-        lows, highs = filter_lows_highs(lows, highs, min_distance)
-
-        # Filter lows and highs to ensure no two are in the same contour level
-        contour_interval = mslp_levels[1] - mslp_levels[0]
-        lows = filter_same_contour(lows, contour_interval)
-        highs = filter_same_contour(highs, contour_interval)
-
-        # FALLBACKS: pick global min/max restricted to the plotting extent (respect edge_buffer)
-        valid_mask = (
-            (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
-            (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
+        # Plot PRATE
+        mesh = ax.contourf(
+            Lon2d, Lat2d, avg_data,
+            levels=prate_levels,
+            cmap=cmap,
+            norm=norm,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            zorder=50
         )
 
-        if len(lows) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmin(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    lows.append((lon_pt, lat_pt, val, "L"))
-            except Exception:
-                pass
+        # Plot MSLP
+        mslp_contours = ax.contour(
+            Lon2d, Lat2d, avg_mslp,
+            levels=mslp_levels,
+            colors='black',
+            linewidths=0.5,
+            transform=ccrs.PlateCarree()
+        )
+        ax.clabel(mslp_contours, fmt='%d', fontsize=6)
 
-        if len(highs) == 0:
-            try:
-                masked = np.where(valid_mask, smoothed_data, np.nan)
-                if not np.all(np.isnan(masked)):
-                    idx = np.unravel_index(np.nanargmax(masked), masked.shape)
-                    lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
-                    highs.append((lon_pt, lat_pt, val, "H"))
-            except Exception:
-                pass
+        # Create blue colormap and snow overlay where ensemble-mean CSNOW indicates snow.
+        # Use the PRATE thresholds for snow intensity and build the snow field with xarray.
+        snow_colors = [
+            "#eef7ff", "#dbeeff", "#c7e3ff", "#add6ff",
+            "#8bc4ff", "#69adf3", "#4f96e2", "#357dcb",
+            "#2666b1", "#1b508f", "#10396d", "#082449"
+        ]
+        snow_cmap = ListedColormap(snow_colors)
+        snow_norm = BoundaryNorm(prate_levels, snow_cmap.N, clip=False)
 
-        # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
-        if len(lows) == 1:
-            lows += [lows[0]]
-        if len(highs) == 1:
-            highs += [highs[0]]
-        if len(lows) == 0:
-            lows = []  # nothing to plot
-        if len(highs) == 0:
-            highs = []
+        # Keep PRATE as the plotted intensity and mask out non-snow areas with xarray.
+        snow_prate = xr.DataArray(avg_data).where(xr.DataArray(avg_csnow) >= 0.5)
 
-        lows = lows[:2]
-        highs = highs[:2]
+        # Draw snow overlay using the same PRATE breakpoints as the rain field.
+        snow_mesh = ax.contourf(
+            Lon2d, Lat2d, snow_prate.values,
+            levels=prate_levels,
+            cmap=snow_cmap,
+            norm=snow_norm,
+            extend='max',
+            transform=ccrs.PlateCarree(),
+            alpha=0.85,
+            zorder=(mesh.get_zorder() if 'mesh' in locals() else 50) + 1
+        )
 
-        # Plot lows and highs with pressure values (ensure they are topmost)
-        for lon, lat, value, label in lows + highs:
-            color = "red" if label == "L" else "blue"
-            # main label (L/H)
-            txt_main = ax.text(
-                lon, lat, label, color=color, fontsize=12, fontweight="bold",
-                ha="center", va="center", transform=ccrs.PlateCarree(),
-                zorder=400, clip_on=False
+        # redraw key map features and MSLP contours on top so they remain visible over snow
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
+        ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor='blue', zorder=200)
+        # re-plot MSLP contours on top of the snow overlay so they remain visible
+        mslp_contours_top = ax.contour(
+            Lon2d, Lat2d, avg_mslp,
+            levels=mslp_levels,
+            colors='black',
+            linewidths=0.6,
+            transform=ccrs.PlateCarree(),
+            zorder=210
+        )
+        ax.clabel(mslp_contours_top, fmt='%d', fontsize=6)
+
+        # Plot lows and highs
+        def plot_lows_highs(ax, Lon2d, Lat2d, data, extent, min_distance=5, edge_buffer=2):
+            """
+            Identify and plot exactly 2 lows (minima) and 2 highs (maxima) on the map.
+            Ensure no high or low is near another, and none are near the map edges.
+            Ensure no two lows or highs are within the same contour level.
+            """
+            # Smooth the data to reduce noise
+            smoothed_data = gaussian_filter(data, sigma=3)
+
+            # Find local minima (lows) and maxima (highs)
+            local_min = minimum_filter(smoothed_data, size=10) == smoothed_data
+            local_max = maximum_filter(smoothed_data, size=10) == smoothed_data
+
+            # Extract coordinates and values for lows and highs
+            points = []
+            lon_min, lon_max, lat_min, lat_max = extent
+            for lon, lat, value, is_low in zip(
+                Lon2d[local_min | local_max].flatten(),
+                Lat2d[local_min | local_max].flatten(),
+                data[local_min | local_max].flatten(),
+                local_min[local_min | local_max].flatten()
+            ):
+                # Skip points near the edges of the map extent
+                if not (lon_min + edge_buffer <= lon <= lon_max - edge_buffer and
+                        lat_min + edge_buffer <= lat <= lat_max - edge_buffer):
+                    continue
+                points.append((lon, lat, value, "L" if is_low else "H"))
+
+            # Sort lows and highs by their prominence (pressure value)
+            lows = sorted([p for p in points if p[3] == "L"], key=lambda x: x[2])  # Lowest pressure
+            highs = sorted([p for p in points if p[3] == "H"], key=lambda x: -x[2])  # Highest pressure
+
+            # Filter points to ensure no two highs or lows are too close to each other
+            def filter_points(points, min_distance):
+                filtered = []
+                for p in points:
+                    if all(np.sqrt((p[0] - fp[0])**2 + (p[1] - fp[1])**2) > min_distance for fp in filtered):
+                        filtered.append(p)
+                return filtered
+
+            # Ensure lows and highs are spaced apart from each other
+            def filter_lows_highs(lows, highs, min_distance):
+                filtered_lows = []
+                filtered_highs = []
+                for low in lows:
+                    if all(np.sqrt((low[0] - high[0])**2 + (low[1] - high[1])**2) > min_distance for high in highs):
+                        filtered_lows.append(low)
+                for high in highs:
+                    if all(np.sqrt((high[0] - low[0])**2 + (high[1] - low[1])**2) > min_distance for low in filtered_lows):
+                        filtered_highs.append(high)
+                return filtered_lows, filtered_highs
+
+            # Ensure no two lows or highs are in the same contour level
+            def filter_same_contour(points, levels):
+                filtered = []
+                for p in points:
+                    if all(abs(p[2] - fp[2]) > levels for fp in filtered):
+                        filtered.append(p)
+                return filtered
+
+            lows = filter_points(lows, min_distance)
+            highs = filter_points(highs, min_distance)
+            lows, highs = filter_lows_highs(lows, highs, min_distance)
+
+            # Filter lows and highs to ensure no two are in the same contour level
+            contour_interval = mslp_levels[1] - mslp_levels[0]
+            lows = filter_same_contour(lows, contour_interval)
+            highs = filter_same_contour(highs, contour_interval)
+
+            # FALLBACKS: pick global min/max restricted to the plotting extent (respect edge_buffer)
+            valid_mask = (
+                (Lon2d >= lon_min + edge_buffer) & (Lon2d <= lon_max - edge_buffer) &
+                (Lat2d >= lat_min + edge_buffer) & (Lat2d <= lat_max - edge_buffer)
             )
-            # add white stroke so text remains readable over contours/overlays
-            txt_main.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
 
-            # numeric pressure below the label
-            txt_val = ax.text(
-                lon, lat - 1, f"{value:.0f}", color=color, fontsize=6, fontweight="bold",
-                ha="center", va="center", transform=ccrs.PlateCarree(),
-                zorder=400, clip_on=False
-            )
-            txt_val.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
-
-    plot_lows_highs(ax, Lon2d, Lat2d, avg_mslp, extent=[-130, -65, 20, 54])
-
-    # place both horizontal colorbars way up near the top of the figure
-    # [left, bottom, width, height] in figure fraction
-    cbar_left = 0.12  # shifted right from 0.06 -> 0.12
-    cbar_bottom = 0.10   # move bars up near the top
-    cbar_width = 0.38
-    cbar_height = 0.018  # compact height
-    cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
-    cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-    cb1.set_label("Average Surface PRATE (GFS + GEFS3 + GEFS12 + GEFS18) mm/hr", fontsize=7)
-    cb1.ax.tick_params(labelsize=6)
-    cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-    cb2.set_label("Snow PRATE intensity where CSNOW is present (mm/hr)", fontsize=7)
-    cb2.ax.tick_params(labelsize=6)
-
-    # place the main title above the plot
-    forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
-    accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
-    fig.suptitle(
-        f"plot3 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
-        fontsize=8,
-        fontweight='bold',
-        y=0.80
-    )
-    # adjust axes so the map has room above/below the title
-    plt.subplots_adjust(top=0.84)
-
-    png_path = os.path.join(BASE_DIR_AVG, "png", f"3_12_18_prate_mslp_avg_{step_str}.png")
-    plt.savefig(png_path, bbox_inches='tight', dpi=300)
-    plt.close(fig)
-    print(f"Saved final AVG PNG FH{step_str}: {png_path}")
-
-    # mark this step as processed
-    save_processed_step(step_str)
-
-    # remove any grib files for this forecast hour to avoid accumulation
-    try:
-        deleted = []
-        for fname in os.listdir(os.path.join(BASE_DIR_AVG, "grib")):
-            if f"f{step_str}" in fname:
-                p = os.path.join(BASE_DIR_AVG, "grib", fname)
+            if len(lows) == 0:
                 try:
-                    os.remove(p)
-                    deleted.append(p)
-                except Exception as ex:
-                    print(f"Failed to delete {p}: {ex}")
-        if deleted:
-            for d in deleted:
-                print(f"Deleted GRIB: {d}")
-        else:
-            print(f"No GRIB files found for FH{step_str} to delete.")
+                    masked = np.where(valid_mask, smoothed_data, np.nan)
+                    if not np.all(np.isnan(masked)):
+                        idx = np.unravel_index(np.nanargmin(masked), masked.shape)
+                        lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                        lows.append((lon_pt, lat_pt, val, "L"))
+                except Exception:
+                    pass
+
+            if len(highs) == 0:
+                try:
+                    masked = np.where(valid_mask, smoothed_data, np.nan)
+                    if not np.all(np.isnan(masked)):
+                        idx = np.unravel_index(np.nanargmax(masked), masked.shape)
+                        lon_pt = float(Lon2d[idx]); lat_pt = float(Lat2d[idx]); val = float(data[idx])
+                        highs.append((lon_pt, lat_pt, val, "H"))
+                except Exception:
+                    pass
+
+            # Ensure there are exactly 2 lows and 2 highs (duplicate only if at least one exists)
+            if len(lows) == 1:
+                lows += [lows[0]]
+            if len(highs) == 1:
+                highs += [highs[0]]
+            if len(lows) == 0:
+                lows = []  # nothing to plot
+            if len(highs) == 0:
+                highs = []
+
+            lows = lows[:2]
+            highs = highs[:2]
+
+            # Plot lows and highs with pressure values (ensure they are topmost)
+            for lon, lat, value, label in lows + highs:
+                color = "red" if label == "L" else "blue"
+                # main label (L/H)
+                txt_main = ax.text(
+                    lon, lat, label, color=color, fontsize=12, fontweight="bold",
+                    ha="center", va="center", transform=ccrs.PlateCarree(),
+                    zorder=400, clip_on=False
+                )
+                # add white stroke so text remains readable over contours/overlays
+                txt_main.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
+
+                # numeric pressure below the label
+                txt_val = ax.text(
+                    lon, lat - 1, f"{value:.0f}", color=color, fontsize=6, fontweight="bold",
+                    ha="center", va="center", transform=ccrs.PlateCarree(),
+                    zorder=400, clip_on=False
+                )
+                txt_val.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
+
+        plot_lows_highs(ax, Lon2d, Lat2d, avg_mslp, extent=[-130, -65, 20, 54])
+
+        # place both horizontal colorbars way up near the top of the figure
+        # [left, bottom, width, height] in figure fraction
+        cbar_left = 0.12  # shifted right from 0.06 -> 0.12
+        cbar_bottom = 0.10   # move bars up near the top
+        cbar_width = 0.38
+        cbar_height = 0.018  # compact height
+        cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+        cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
+        cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
+        cb1.set_label("Average Surface PRATE (GFS + GEFS3 + GEFS12 + GEFS18) mm/hr", fontsize=7)
+        cb1.ax.tick_params(labelsize=6)
+        cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
+        cb2.set_label("Snow PRATE intensity where CSNOW is present (mm/hr)", fontsize=7)
+        cb2.ax.tick_params(labelsize=6)
+
+        # place the main title above the plot
+        forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
+        accuracy_str = f" | Accuracy: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Accuracy: N/A"
+        fig.suptitle(
+            f"plot3 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
+            fontsize=8,
+            fontweight='bold',
+            y=0.80
+        )
+        # adjust axes so the map has room above/below the title
+        plt.subplots_adjust(top=0.84)
+
+        png_path = os.path.join(BASE_DIR_AVG, "png", f"3_12_18_prate_mslp_avg_{step_str}.png")
+        plt.savefig(png_path, bbox_inches='tight', dpi=300)
+        plt.close(fig)
+        print(f"Saved final AVG PNG FH{step_str}: {png_path}")
+
+        # mark this step as processed
+        save_processed_step(step_str)
+
+        # remove any grib files for this forecast hour to avoid accumulation
+        try:
+            deleted = []
+            for fname in os.listdir(os.path.join(BASE_DIR_AVG, "grib")):
+                if f"f{step_str}" in fname:
+                    p = os.path.join(BASE_DIR_AVG, "grib", fname)
+                    try:
+                        os.remove(p)
+                        deleted.append(p)
+                    except Exception as ex:
+                        print(f"Failed to delete {p}: {ex}")
+            if deleted:
+                for d in deleted:
+                    print(f"Deleted GRIB: {d}")
+            else:
+                print(f"No GRIB files found for FH{step_str} to delete.")
+        except Exception as e:
+            print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
     except Exception as e:
-        print(f"Error scanning/deleting grib files for FH{step_str}: {e}")
+        skip_forecast_hour(step_str, e)
+        plt.close('all')
+        gc.collect()
+        time.sleep(1)
+        continue
 
     gc.collect()
     time.sleep(1)
