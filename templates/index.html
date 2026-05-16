@@ -5,40 +5,66 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ADKwx</title>
     <style>
+        :root {
+            --bg: #eef4f8;
+            --bg-accent: #dbe6ee;
+            --surface: rgba(255, 255, 255, 0.82);
+            --surface-strong: rgba(255, 255, 255, 0.94);
+            --surface-border: rgba(104, 128, 150, 0.18);
+            --text: #183042;
+            --muted: #587082;
+            --header-start: #0f3b52;
+            --header-end: #1f6b78;
+            --accent: #4d9ab0;
+            --accent-strong: #2b6c7a;
+            --label-bg: rgba(15, 59, 82, 0.84);
+            --shadow: 0 18px 40px rgba(24, 48, 66, 0.12);
+        }
         body {
             margin: 0;
-            font-family: Arial, sans-serif;
+            font-family: "Segoe UI Variable", "Segoe UI", sans-serif;
+            color: var(--text);
+            background:
+                radial-gradient(circle at top left, rgba(112, 173, 192, 0.2), transparent 32%),
+                linear-gradient(180deg, var(--bg) 0%, #f7fafc 100%);
         }
         header {
-            background-color: #333;
+            background: linear-gradient(135deg, var(--header-start), var(--header-end));
             color: white;
-            padding: 10px;
+            padding: 14px 24px;
             text-align: center;
-            font-size: 24px;
-            height: 60px;
+            font-size: 28px;
+            font-weight: 700;
+            letter-spacing: 0.06em;
+            text-transform: uppercase;
+            height: 72px;
             box-sizing: border-box;
+            box-shadow: 0 10px 24px rgba(15, 59, 82, 0.18);
         }
         .container {
             display: flex;
             flex-direction: row;
-            height: calc(100vh - 60px);
+            height: calc(100vh - 72px);
         }
         /* slightly narrower left side to give more room for images */
         .left-side {
             width: 150px; /* slightly narrower to give more room */
-            background-color: #f0f0f0;
-            border-right: 1px solid #ccc;
+            background:
+                linear-gradient(180deg, rgba(31, 107, 120, 0.12), rgba(255, 255, 255, 0.35)),
+                linear-gradient(135deg, #dbe7ef, #eff5f8);
+            border-right: 1px solid var(--surface-border);
             box-sizing: border-box;
         }
         .main-content {
             flex: 1;
             display: flex;
             flex-direction: column;
+            min-width: 0;
         }
         /* slide holder */
         .slider-container {
             flex: 1;
-            padding: 12px;
+            padding: 18px;
             overflow: auto; /* allow scroll on small screens */
         }
         /* hidden by default; active becomes a 2x2 grid filling most of the view */
@@ -59,12 +85,15 @@
         }
         .panel {
             position: relative;
-            background: #fff;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+            background: linear-gradient(180deg, var(--surface-strong), var(--surface));
+            border: 1px solid var(--surface-border);
+            border-radius: 18px;
+            box-shadow: var(--shadow);
+            backdrop-filter: blur(12px);
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 6px;
+            padding: 10px;
             overflow: hidden;
             min-height: 320px; /* reduced size */
         }
@@ -73,12 +102,14 @@
             top: 8px;
             left: 8px;
             z-index: 1;
-            padding: 4px 8px;
-            background: rgba(34, 34, 34, 0.82);
+            padding: 6px 10px;
+            border-radius: 999px;
+            background: var(--label-bg);
             color: #fff;
-            font-size: 12px;
+            font-size: 11px;
             font-weight: 700;
-            letter-spacing: 0.03em;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
         }
         /* let PNGs fill the panel as much as possible while preserving aspect */
         .panel img {
@@ -88,18 +119,31 @@
             display: block;
         }
         .empty {
-            color: #666;
+            color: var(--muted);
             font-size: 14px;
             padding: 20px;
             text-align: center;
         }
         .slider-controls {
             text-align: center;
-            padding: 10px 0;
-            background: #f4f4f4;
+            padding: 14px 18px 18px;
+            background: rgba(255, 255, 255, 0.74);
+            border-top: 1px solid var(--surface-border);
+            box-shadow: 0 -8px 24px rgba(24, 48, 66, 0.05);
+            backdrop-filter: blur(10px);
         }
-        .slider-bar { width: 80%; max-width: 1200px; }
-        .forecast-hour { margin-top: 8px; font-size: 14px; font-weight: bold; }
+        .slider-bar {
+            width: 80%;
+            max-width: 1200px;
+            accent-color: var(--accent-strong);
+        }
+        .forecast-hour {
+            margin-top: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            color: var(--accent-strong);
+            letter-spacing: 0.04em;
+        }
 
         @media (max-width: 1100px) {
             .left-side { display: none; }
