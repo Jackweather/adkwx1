@@ -120,7 +120,7 @@
                     {% for group, image in slide.images.items() %}
                     <div class="panel">
                         {% if image %}
-                        <img src="{{ url_for('serve_png', group=group, filename=image) }}" alt="Forecast {{ group }}">
+                        <img src="{{ url_for('serve_png', group=group, filename=image.filename, v=image.version) }}" alt="Forecast {{ group }}">
                         {% else %}
                         <div class="empty">No image for {{ group }}</div>
                         {% endif %}
