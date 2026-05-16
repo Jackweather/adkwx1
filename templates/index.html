@@ -5,344 +5,112 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ADKwx</title>
     <style>
-        :root {
-            --bg-top: #f4efe4;
-            --bg-bottom: #d9e4ec;
-            --panel: rgba(255, 252, 247, 0.88);
-            --panel-border: rgba(77, 92, 104, 0.2);
-            --panel-shadow: 0 22px 50px rgba(39, 48, 61, 0.16);
-            --text-strong: #1f2a33;
-            --text-muted: #55626d;
-            --accent: #0c6a77;
-            --accent-soft: rgba(12, 106, 119, 0.12);
-            --accent-warm: #d96e39;
-            --header-height: 84px;
-            --radius-lg: 28px;
-            --radius-md: 20px;
-        }
         body {
             margin: 0;
-            min-height: 100vh;
-            font-family: "Segoe UI Variable Display", "Bahnschrift", "Trebuchet MS", sans-serif;
-            color: var(--text-strong);
-            background:
-                radial-gradient(circle at top left, rgba(255, 255, 255, 0.75), transparent 38%),
-                radial-gradient(circle at bottom right, rgba(217, 110, 57, 0.16), transparent 26%),
-                linear-gradient(160deg, var(--bg-top), var(--bg-bottom));
+            font-family: Arial, sans-serif;
         }
         header {
-            display: flex;
-            align-items: center;
-            justify-content: space-between;
-            gap: 16px;
-            padding: 18px 28px;
-            color: var(--text-strong);
+            background-color: #333;
+            color: white;
+            padding: 10px;
+            text-align: center;
             font-size: 24px;
-            height: var(--header-height);
+            height: 60px;
             box-sizing: border-box;
-            background: rgba(255, 251, 245, 0.65);
-            border-bottom: 1px solid rgba(77, 92, 104, 0.12);
-            backdrop-filter: blur(18px);
-            position: sticky;
-            top: 0;
-            z-index: 10;
-        }
-        .brand-mark {
-            display: flex;
-            flex-direction: column;
-            gap: 4px;
-        }
-        .brand-title {
-            font-family: "Georgia", "Palatino Linotype", serif;
-            font-size: 34px;
-            font-weight: 700;
-            letter-spacing: 0.05em;
-        }
-        .brand-subtitle {
-            font-size: 12px;
-            font-weight: 700;
-            text-transform: uppercase;
-            letter-spacing: 0.22em;
-            color: var(--text-muted);
-        }
-        .header-badge {
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            padding: 10px 14px;
-            border-radius: 999px;
-            background: rgba(255, 255, 255, 0.75);
-            border: 1px solid rgba(77, 92, 104, 0.14);
-            box-shadow: 0 10px 20px rgba(39, 48, 61, 0.08);
-            color: var(--text-muted);
-            font-size: 13px;
-            font-weight: 700;
-            letter-spacing: 0.08em;
-            text-transform: uppercase;
-        }
-        .header-badge::before {
-            content: "";
-            width: 10px;
-            height: 10px;
-            border-radius: 50%;
-            background: linear-gradient(135deg, var(--accent), var(--accent-warm));
-            box-shadow: 0 0 0 4px rgba(12, 106, 119, 0.12);
         }
         .container {
             display: flex;
             flex-direction: row;
-            min-height: calc(100vh - var(--header-height));
-            gap: 18px;
-            padding: 18px;
-            box-sizing: border-box;
+            height: calc(100vh - 60px);
         }
+        /* slightly narrower left side to give more room for images */
         .left-side {
-            width: 260px;
-            padding: 22px 18px;
+            width: 150px; /* slightly narrower to give more room */
+            background-color: #f0f0f0;
+            border-right: 1px solid #ccc;
             box-sizing: border-box;
-            border-radius: var(--radius-lg);
-            background: linear-gradient(180deg, rgba(255, 251, 245, 0.9), rgba(245, 248, 250, 0.82));
-            border: 1px solid rgba(77, 92, 104, 0.14);
-            box-shadow: var(--panel-shadow);
-            display: flex;
-            flex-direction: column;
-            gap: 18px;
-        }
-        .left-side h2,
-        .left-side h3,
-        .rail-value,
-        .forecast-hour {
-            margin: 0;
-        }
-        .rail-card {
-            padding: 16px;
-            border-radius: var(--radius-md);
-            background: rgba(255, 255, 255, 0.62);
-            border: 1px solid rgba(77, 92, 104, 0.12);
-        }
-        .rail-card h2,
-        .rail-card h3 {
-            font-size: 14px;
-            text-transform: uppercase;
-            letter-spacing: 0.12em;
-            color: var(--text-muted);
-        }
-        .rail-lead {
-            margin: 10px 0 0;
-            line-height: 1.5;
-            color: var(--text-strong);
-            font-size: 15px;
-        }
-        .rail-value {
-            margin-top: 10px;
-            font-family: "Georgia", "Palatino Linotype", serif;
-            font-size: 34px;
-            color: var(--accent);
-        }
-        .group-list {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 8px;
-            margin-top: 12px;
-        }
-        .group-pill {
-            padding: 8px 10px;
-            border-radius: 999px;
-            background: var(--accent-soft);
-            color: var(--accent);
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.04em;
-        }
-        .rail-note {
-            margin: 10px 0 0;
-            font-size: 13px;
-            line-height: 1.5;
-            color: var(--text-muted);
         }
         .main-content {
             flex: 1;
             display: flex;
             flex-direction: column;
-            gap: 16px;
         }
+        /* slide holder */
         .slider-container {
             flex: 1;
-            padding: 18px;
-            overflow: auto;
-            border-radius: calc(var(--radius-lg) + 4px);
-            background: rgba(255, 253, 249, 0.54);
-            border: 1px solid rgba(77, 92, 104, 0.12);
-            box-shadow: var(--panel-shadow);
+            padding: 12px;
+            overflow: auto; /* allow scroll on small screens */
         }
+        /* hidden by default; active becomes a 2x2 grid filling most of the view */
         .slide {
             display: none;
             width: 100%;
             height: 100%;
-            gap: 16px;
+            gap: 12px;
             box-sizing: border-box;
         }
         .slide.active {
             display: grid;
             grid-template-columns: 1fr 1fr;
+            /* slightly smaller rows so panels are a bit reduced */
             grid-template-rows: minmax(320px, 1fr) minmax(320px, 1fr);
-            gap: 16px;
+            gap: 10px;
             align-items: stretch;
-            animation: slideReveal 220ms ease-out;
         }
         .panel {
             position: relative;
-            background:
-                linear-gradient(180deg, rgba(255, 255, 255, 0.95), rgba(246, 249, 250, 0.88));
-            border-radius: var(--radius-md);
-            border: 1px solid var(--panel-border);
-            box-shadow: 0 18px 35px rgba(39, 48, 61, 0.1);
+            background: #fff;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.08);
             display: flex;
             align-items: center;
             justify-content: center;
-            padding: 12px;
+            padding: 6px;
             overflow: hidden;
-            min-height: 320px;
-        }
-        .panel::after {
-            content: "";
-            position: absolute;
-            inset: auto -12% -28% auto;
-            width: 140px;
-            height: 140px;
-            border-radius: 50%;
-            background: radial-gradient(circle, rgba(12, 106, 119, 0.12), transparent 68%);
-            pointer-events: none;
+            min-height: 320px; /* reduced size */
         }
         .panel-label {
             position: absolute;
-            top: 12px;
-            left: 12px;
+            top: 8px;
+            left: 8px;
             z-index: 1;
-            padding: 7px 11px;
-            border-radius: 999px;
-            background: rgba(31, 42, 51, 0.88);
-            color: #fffdf9;
-            font-size: 11px;
+            padding: 4px 8px;
+            background: rgba(34, 34, 34, 0.82);
+            color: #fff;
+            font-size: 12px;
             font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
+            letter-spacing: 0.03em;
         }
+        /* let PNGs fill the panel as much as possible while preserving aspect */
         .panel img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
-            filter: drop-shadow(0 10px 20px rgba(39, 48, 61, 0.12));
         }
         .empty {
-            color: var(--text-muted);
+            color: #666;
             font-size: 14px;
             padding: 20px;
             text-align: center;
-            max-width: 220px;
-            line-height: 1.5;
         }
         .slider-controls {
-            display: flex;
-            align-items: center;
-            gap: 18px;
-            padding: 16px 20px;
-            border-radius: var(--radius-lg);
-            background: rgba(255, 251, 245, 0.86);
-            border: 1px solid rgba(77, 92, 104, 0.12);
-            box-shadow: var(--panel-shadow);
+            text-align: center;
+            padding: 10px 0;
+            background: #f4f4f4;
         }
-        .slider-copy {
-            min-width: 220px;
-        }
-        .slider-label {
-            font-size: 12px;
-            font-weight: 700;
-            letter-spacing: 0.12em;
-            text-transform: uppercase;
-            color: var(--text-muted);
-        }
-        .forecast-hour {
-            margin-top: 4px;
-            font-family: "Georgia", "Palatino Linotype", serif;
-            font-size: 30px;
-            color: var(--text-strong);
-        }
-        .slider-meta {
-            margin-top: 4px;
-            font-size: 13px;
-            color: var(--text-muted);
-        }
-        .slider-track {
-            flex: 1;
-            display: flex;
-            flex-direction: column;
-            gap: 8px;
-        }
-        .slider-bar {
-            width: 100%;
-            accent-color: var(--accent);
-        }
-        .slider-scale {
-            display: flex;
-            justify-content: space-between;
-            font-size: 12px;
-            color: var(--text-muted);
-        }
-
-        @keyframes slideReveal {
-            from {
-                opacity: 0;
-                transform: translateY(8px);
-            }
-            to {
-                opacity: 1;
-                transform: translateY(0);
-            }
-        }
+        .slider-bar { width: 80%; max-width: 1200px; }
+        .forecast-hour { margin-top: 8px; font-size: 14px; font-weight: bold; }
 
         @media (max-width: 1100px) {
             .left-side { display: none; }
-            .container {
-                padding: 14px;
-            }
             .slide.active { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(260px, auto) minmax(260px, auto); }
             .panel { min-height: 260px; }
-            .slider-controls {
-                flex-direction: column;
-                align-items: stretch;
-            }
         }
-        @media (max-width: 720px) {
-            header {
-                height: auto;
-                padding: 18px 18px 16px;
-                flex-direction: column;
-                align-items: flex-start;
-            }
-            .container {
-                min-height: auto;
-                padding: 12px;
-            }
-            .slider-container,
-            .slider-controls {
-                padding: 14px;
-            }
-        }
+        /* keep 2x2 on small phones like iPhone, reduce heights so it fits */
         @media (max-width: 420px) {
             .left-side { display: none; }
-            .slide.active { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(160px, auto) minmax(160px, auto); gap: 8px; }
-            .panel { min-height: 160px; padding: 8px; }
-            .panel-label {
-                top: 8px;
-                left: 8px;
-                padding: 5px 8px;
-                font-size: 10px;
-            }
-            .forecast-hour {
-                font-size: 24px;
-            }
+            .slide.active { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(160px, auto) minmax(160px, auto); gap:8px; }
+            .panel { min-height: 160px; padding:4px; }
         }
         @media (max-width: 320px) {
             .slide.active { grid-template-rows: minmax(140px, auto) minmax(140px, auto); }
@@ -351,36 +119,10 @@
     </style>
 </head>
 <body>
-    <header>
-        <div class="brand-mark">
-            <div class="brand-title">ADKwx</div>
-            <div class="brand-subtitle">Forecast Mosaic Viewer</div>
-        </div>
-        <div class="header-badge">Four-panel model comparison</div>
-    </header>
+    <header>ADKwx</header>
     <div class="container">
         <div class="left-side">
-            <div class="rail-card">
-                <h2>Overview</h2>
-                <p class="rail-lead">Browse synchronized forecast panels with a cleaner side-by-side presentation and a faster read on the current hour.</p>
-            </div>
-            <div class="rail-card">
-                <h3>Current Frame</h3>
-                <p class="rail-value" id="railForecastHour">000</p>
-                <p class="rail-note">Slide updates stay synchronized with the forecast slider below.</p>
-            </div>
-            <div class="rail-card">
-                <h3>Panels</h3>
-                <div class="group-list">
-                    {% for group in groups %}
-                    <span class="group-pill">{{ group }}</span>
-                    {% endfor %}
-                </div>
-            </div>
-            <div class="rail-card">
-                <h3>Tip</h3>
-                <p class="rail-note">Use the slider to scrub between forecast hours and watch how each panel changes at the same cadence.</p>
-            </div>
+            <!-- empty left area -->
         </div>
         <div class="main-content">
             <div class="slider-container">
@@ -402,18 +144,8 @@
                 {% endfor %}
             </div>
             <div class="slider-controls">
-                <div class="slider-copy">
-                    <div class="slider-label">Forecast Frame</div>
-                    <div class="forecast-hour" id="forecastHour">Forecast Hour: 000</div>
-                    <div class="slider-meta">Scrub to compare all panels at the same forecast step.</div>
-                </div>
-                <div class="slider-track">
-                    <input type="range" class="slider-bar" min="0" max="{{ slides|length - 1 }}" value="0" id="sliderBar">
-                    <div class="slider-scale">
-                        <span>Start</span>
-                        <span>Latest</span>
-                    </div>
-                </div>
+                <input type="range" class="slider-bar" min="0" max="{{ slides|length - 1 }}" value="0" id="sliderBar">
+                <div class="forecast-hour" id="forecastHour">Forecast Hour: 000</div>
             </div>
         </div>
     </div>
@@ -421,7 +153,6 @@
         const slides = Array.from(document.querySelectorAll('.slide'));
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
-        const railForecastHour = document.getElementById('railForecastHour');
 
         function formatIndex(idx) {
             return (/^\d+$/).test(idx) ? String(idx).padStart(3,'0') : idx;
@@ -430,9 +161,7 @@
         function showSlide(index) {
             slides.forEach((s, i) => s.classList.toggle('active', i === index));
             const idx = slides[index] && slides[index].dataset.index ? slides[index].dataset.index : '';
-            const formatted = formatIndex(idx);
-            forecastHour.textContent = `Forecast Hour: ${formatted}`;
-            if (railForecastHour) railForecastHour.textContent = formatted;
+            forecastHour.textContent = `Forecast Hour: ${formatIndex(idx)}`;
         }
 
         sliderBar.addEventListener('input', (event) => {
