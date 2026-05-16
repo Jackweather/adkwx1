@@ -14,11 +14,12 @@ import time
 import gc
 from scipy.ndimage import zoom, gaussian_filter, minimum_filter, maximum_filter  # Add imports for filtering
 from datetime import datetime, timedelta
+from pathlib import Path
 import pytz  # Add this import for timezone handling
 
 
-current_dir = os.path.dirname(os.path.abspath(__file__))
-BASE_DIR_AVG = os.path.join(current_dir, '3_12_18_GFS_OUTPUT')
+BASE_DIR = Path('/var/data')
+BASE_DIR_AVG = BASE_DIR / '3_12_18_GFS_OUTPUT'
 
 # Make sure AVG subfolders exist (recreate grib cleanly)
 grib_dir = os.path.join(BASE_DIR_AVG, "grib")
