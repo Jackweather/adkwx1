@@ -68,6 +68,18 @@
             overflow: hidden;
             min-height: 320px; /* reduced size */
         }
+        .panel-label {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            z-index: 1;
+            padding: 4px 8px;
+            background: rgba(34, 34, 34, 0.82);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.03em;
+        }
         /* let PNGs fill the panel as much as possible while preserving aspect */
         .panel img {
             width: 100%;
@@ -117,22 +129,17 @@
                 {% for slide in slides %}
                 <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ slide.index }}">
                     {# render panels in the same order as groups in app.py #}
-                    {% for group, image in slide.images.items() %}
+                    {% for group in groups %}
+                    {% set image = slide.images.get(group) %}
                     <div class="panel">
+                        <div class="panel-label">{{ group }}</div>
                         {% if image %}
                         <img src="{{ url_for('serve_png', group=group, filename=image.filename, v=image.version) }}" alt="Forecast {{ group }}">
                         {% else %}
                         <div class="empty">No image for {{ group }}</div>
                         {% endif %}
-                        <!-- caption removed -->
                     </div>
                     {% endfor %}
-                    {# if there are fewer than 4 groups, fill remaining grid cells with empty panels #}
-                    {% if slide.images|length < 4 %}
-                        {% for i in range(4 - (slide.images|length)) %}
-                        <div class="panel"><div class="empty">No image</div></div>
-                        {% endfor %}
-                    {% endif %}
                 </div>
                 {% endfor %}
             </div>
