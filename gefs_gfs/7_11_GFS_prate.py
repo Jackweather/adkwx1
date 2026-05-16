@@ -41,10 +41,13 @@ os.makedirs(prev_dir, exist_ok=True)
 
 # File to track completed forecast steps for the current run
 processed_steps_file = os.path.join(BASE_DIR_AVG, "processed_steps_7_11.txt")
+error_log_file = os.path.join(BASE_DIR_AVG, "errors_7_11.txt")
 
 # Clear the processed steps file at the start of a new run
 if os.path.exists(processed_steps_file):
     os.remove(processed_steps_file)
+if os.path.exists(error_log_file):
+    os.remove(error_log_file)
 
 # Helper function to load processed steps
 def load_processed_steps():
@@ -177,7 +180,14 @@ gefs_members = ["07", "11"]  # members to include
 MAX_DOWNLOAD_RETRIES = 3
 
 
+def log_error(step_str, context, error):
+    timestamp = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+    with open(error_log_file, "a") as f:
+        f.write(f"[{timestamp}] FH{step_str} | {context} | {error}\n")
+
+
 def skip_forecast_hour(step_str, reason):
+    log_error(step_str, "Skipping forecast hour", reason)
     print(f"Skipping forecast hour FH{step_str}: {reason}")
 
 
@@ -286,6 +296,7 @@ for step in forecast_steps:
         lons = ds_gfs['longitude'].values
         lons_plot = np.where(lons > 180, lons - 360, lons)
     except Exception as e:
+        log_error(step_str, "Failed to open GFS PRATE", e)
         print(f"Failed to open GFS GRIB FH{step_str}: {e}")
         continue
 
@@ -294,6 +305,7 @@ for step in forecast_steps:
         ds_gfs_mslp = xr.open_dataset(gfs_mslp_path, engine="cfgrib", filter_by_keys={'typeOfLevel': 'meanSea'})
         data_gfs_mslp = ds_gfs_mslp['mslet'].values / 100  # Convert Pa to hPa
     except Exception as e:
+        log_error(step_str, "Failed to open GFS MSLP", e)
         print(f"Failed to open GFS MSLP GRIB FH{step_str}: {e}")
         continue
 
@@ -304,6 +316,7 @@ for step in forecast_steps:
         csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gfs_csnow.data_vars)[0]
         data_gfs_csnow = ds_gfs_csnow[csnow_var_name].values
     except Exception as e:
+        log_error(step_str, "Failed to open GFS CSNOW", e)
         print(f"Failed to open GFS CSNOW GRIB FH{step_str}: {e}")
         continue
 
@@ -384,6 +397,7 @@ for step in forecast_steps:
             ds_gefs = xr.open_dataset(gefs_path, engine="cfgrib", filter_by_keys={'stepType': 'avg'})
             data_gefs = ds_gefs['prate'].values * 3600
         except Exception as e:
+            log_error(step_str, f"Failed to open GEFS member {member} PRATE", e)
             print(f"Failed to open GEFS member {member} PRATE FH{step_str}: {e}")
             continue
 
@@ -392,6 +406,7 @@ for step in forecast_steps:
             ds_gefs_mslp = xr.open_dataset(gefs_mslp_path, engine="cfgrib", filter_by_keys={'typeOfLevel': 'meanSea'})
             data_gefs_mslp = ds_gefs_mslp['mslet'].values / 100  # Convert Pa to hPa
         except Exception as e:
+            log_error(step_str, f"Failed to open GEFS member {member} MSLP", e)
             print(f"Failed to open GEFS member {member} MSLP FH{step_str}: {e}")
             continue
 
@@ -402,6 +417,7 @@ for step in forecast_steps:
             csnow_var_name = csnow_vars[0] if csnow_vars else list(ds_gefs_csnow.data_vars)[0]
             data_gefs_csnow = ds_gefs_csnow[csnow_var_name].values
         except Exception as e:
+            log_error(step_str, f"Failed to open GEFS member {member} CSNOW", e)
             print(f"Failed to open GEFS member {member} CSNOW FH{step_str}: {e}")
             continue
 
