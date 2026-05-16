@@ -6,9 +6,12 @@ import threading
 import traceback
 import getpass
 import re
+from pathlib import Path
 
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+
+BASE_DIR = Path("/var/data")
 
 
 def run_scripts(scripts, max_workers):
@@ -62,10 +65,10 @@ def run_scripts(scripts, max_workers):
 
 # Add new groups for 3_12_18 and 7_11 outputs
 PNG_DIRS = {
-    "5_6_10": os.path.join(os.getcwd(), "gefs_gfs", "5_6_10_GFS_OUTPUT", "png"),
-    "4_8_15": os.path.join(os.getcwd(), "gefs_gfs", "4_8_15_GFS_OUTPUT", "png"),
-    "3_12_18": os.path.join(os.getcwd(), "gefs_gfs", "3_12_18_GFS_OUTPUT", "png"),
-    "7_11": os.path.join(os.getcwd(), "gefs_gfs", "7_11_GFS_OUTPUT", "png"),
+    "5_6_10": BASE_DIR / "5_6_10_GFS_OUTPUT" / "png",
+    "4_8_15": BASE_DIR / "4_8_15_GFS_OUTPUT" / "png",
+    "3_12_18": BASE_DIR / "3_12_18_GFS_OUTPUT" / "png",
+    "7_11": BASE_DIR / "7_11_GFS_OUTPUT" / "png",
 }
 
 @app.route('/')
