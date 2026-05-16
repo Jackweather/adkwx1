@@ -8,6 +8,7 @@ import getpass
 import re
 
 app = Flask(__name__)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 
 def run_scripts(scripts, max_workers):
@@ -75,14 +76,22 @@ def index():
         group_files[group] = {}
         if os.path.isdir(path):
             for f in sorted([x for x in os.listdir(path) if x.endswith('.png')]):
+                file_path = os.path.join(path, f)
+                version = str(int(os.path.getmtime(file_path)))
                 m = re.search(r'_(\d{3})\.png$', f)
                 if m:
                     key = m.group(1)
-                    group_files[group][key] = f
+                    group_files[group][key] = {
+                        "filename": f,
+                        "version": version,
+                    }
                 else:
                     # fall back to numeric ordering if no index found
                     idx = f"idx_{len(group_files[group])}"
-                    group_files[group][idx] = f
+                    group_files[group][idx] = {
+                        "filename": f,
+                        "version": version,
+                    }
 
     # determine ordered union of indices (prefer numeric 3-digit keys)
     all_keys = set()
@@ -111,7 +120,11 @@ def serve_png(group, filename):
     dir_path = PNG_DIRS.get(group)
     if not dir_path or not os.path.isdir(dir_path):
         abort(404)
-    return send_from_directory(dir_path, filename)
+    response = send_from_directory(dir_path, filename, max_age=0)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route("/run-task1")
 def run_task1():
