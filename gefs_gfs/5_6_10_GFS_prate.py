@@ -388,11 +388,6 @@ for step in forecast_steps:
         if step_failed:
             break
 
-    if step_failed:
-        gc.collect()
-        time.sleep(1)
-        continue
-
         # Open GEFS PRATE
         try:
             ds_gefs = xr.open_dataset(gefs_path, engine="cfgrib", filter_by_keys={'stepType': 'avg'})
@@ -445,6 +440,11 @@ for step in forecast_steps:
         gefs_data_list.append(data_gefs_resized)
         gefs_mslp_list.append(data_gefs_mslp_resized)
         gefs_snow_list.append(data_gefs_csnow_resized)
+
+    if step_failed:
+        gc.collect()
+        time.sleep(1)
+        continue
 
     try:
         # ---- COMPUTE FINAL AVERAGES ----
