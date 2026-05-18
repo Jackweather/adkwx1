@@ -1,4 +1,4 @@
-from flask import Flask, render_template, send_from_directory, abort
+from flask import Flask, render_template, send_from_directory, abort, jsonify
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import os
 import subprocess
@@ -69,13 +69,13 @@ PNG_DIRS = {
     "4_8_15": BASE_DIR / "4_8_15_GFS_OUTPUT" / "png",
     "3_12_18": BASE_DIR / "3_12_18_GFS_OUTPUT" / "png",
     "7_11": BASE_DIR / "7_11_GFS_OUTPUT" / "png",
-    "Main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
+    "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
 }
 
-DEFAULT_PANEL_GROUPS = ["main_NWP", "5_6_10", "3_12_18", "7_11"]
+DEFAULT_PANEL_GROUPS = ["5_6_10", "main_NWP", "3_12_18", "7_11"]
 
-@app.route('/')
-def index():
+
+def build_slide_payload():
     # build per-group filename map keyed by 3-digit forecast index (e.g. "006")
     group_files = {}
     for group, path in PNG_DIRS.items():
@@ -92,34 +92,53 @@ def index():
                         "version": version,
                     }
                 else:
-                    # fall back to numeric ordering if no index found
                     idx = f"idx_{len(group_files[group])}"
                     group_files[group][idx] = {
                         "filename": f,
                         "version": version,
                     }
 
-    # determine ordered union of indices (prefer numeric 3-digit keys)
     all_keys = set()
     for gmap in group_files.values():
         all_keys.update(gmap.keys())
 
-    # try to sort numeric 3-digit keys first, then non-numeric
     def key_sort(k):
         return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
-    ordered_keys = sorted(all_keys, key=key_sort)
 
-    # create slides with all available groups while keeping a fixed four-panel layout
+    ordered_keys = sorted(all_keys, key=key_sort)
     groups = list(PNG_DIRS.keys())
     slides = []
     for k in ordered_keys:
-        slide = {
+        slides.append({
             "index": k,
             "images": {group: group_files.get(group, {}).get(k) for group in groups}
-        }
-        slides.append(slide)
+        })
 
-    return render_template('index.html', slides=slides, groups=groups, default_panel_groups=DEFAULT_PANEL_GROUPS)
+    return {
+        "groups": groups,
+        "slides": slides,
+        "default_panel_groups": DEFAULT_PANEL_GROUPS,
+    }
+
+@app.route('/')
+def index():
+    payload = build_slide_payload()
+    return render_template(
+        'index.html',
+        slides=payload["slides"],
+        groups=payload["groups"],
+        default_panel_groups=payload["default_panel_groups"],
+    )
+
+
+@app.route('/slide-data')
+def slide_data():
+    payload = build_slide_payload()
+    response = jsonify(payload)
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
 
 @app.route('/pngs/<group>/<filename>')
 def serve_png(group, filename):
