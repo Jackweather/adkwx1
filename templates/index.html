@@ -224,7 +224,12 @@
     <script id="slideData" type="application/json">{{ slides | tojson }}</script>
     <script id="defaultPanelGroups" type="application/json">{{ default_panel_groups | tojson }}</script>
     <script>
-        const slideElements = Array.from(document.querySelectorAll('.slide'));
+        const sliderContainer = document.querySelector('.slider-container');
+        const allGroups = Array.from(
+            new Set(
+                Array.from(document.querySelectorAll('.panel-select option')).map((option) => option.value)
+            )
+        );
         const slideDataElement = document.getElementById('slideData');
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
@@ -235,6 +240,8 @@
         const REFRESH_INTERVAL_MS = 30000;
         const PANEL_SELECTIONS_KEY = 'adkwx-panel-selections-v2';
         let selectedGroups = loadSelectedGroups();
+        let slideElements = [];
+        let currentSlideIndex = 0;
 
         function loadSelectedGroups() {
             try {
@@ -265,6 +272,101 @@
                     panelSelect.value = selectedGroup;
                 }
             });
+        }
+
+        function attachPanelSelectionHandler(select) {
+            const handlePanelSelection = (event) => {
+                const panelIndex = Number(event.target.dataset.panelIndex);
+                selectedGroups[panelIndex] = event.target.value;
+                saveSelectedGroups();
+                renderSlides();
+            };
+
+            select.addEventListener('input', handlePanelSelection);
+            select.addEventListener('change', handlePanelSelection);
+        }
+
+        function createPanelElement(slide, panelIndex) {
+            const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || '';
+            const imageData = selectedGroup ? slide.images[selectedGroup] : null;
+
+            const panel = document.createElement('div');
+            panel.className = 'panel';
+            panel.dataset.panelIndex = String(panelIndex);
+
+            const panelHeader = document.createElement('div');
+            panelHeader.className = 'panel-header';
+
+            const panelLabel = document.createElement('div');
+            panelLabel.className = 'panel-label';
+            panelLabel.textContent = `Panel ${panelIndex + 1}`;
+
+            const panelSelect = document.createElement('select');
+            panelSelect.className = 'panel-select';
+            panelSelect.dataset.panelIndex = String(panelIndex);
+            panelSelect.setAttribute('aria-label', `Choose image for panel ${panelIndex + 1}`);
+
+            allGroups.forEach((group) => {
+                const option = document.createElement('option');
+                option.value = group;
+                option.textContent = group;
+                option.selected = group === selectedGroup;
+                panelSelect.appendChild(option);
+            });
+            attachPanelSelectionHandler(panelSelect);
+
+            panelHeader.appendChild(panelLabel);
+            panelHeader.appendChild(panelSelect);
+
+            const image = document.createElement('img');
+            image.className = 'panel-image';
+            image.alt = `Forecast ${selectedGroup}`;
+
+            const empty = document.createElement('div');
+            empty.className = 'empty';
+            empty.textContent = `No image for ${selectedGroup}`;
+
+            if (imageData) {
+                image.src = buildImageUrl(selectedGroup, imageData);
+                empty.classList.add('is-hidden');
+            } else {
+                image.classList.add('is-hidden');
+            }
+
+            panel.appendChild(panelHeader);
+            panel.appendChild(image);
+            panel.appendChild(empty);
+            return panel;
+        }
+
+        function renderSlides() {
+            currentSlideIndex = Math.min(currentSlideIndex, Math.max(slideData.length - 1, 0));
+            sliderContainer.innerHTML = '';
+
+            slideData.forEach((slide, index) => {
+                const slideElement = document.createElement('div');
+                slideElement.className = 'slide';
+                slideElement.dataset.index = slide.index;
+                if (index === currentSlideIndex) {
+                    slideElement.classList.add('active');
+                }
+
+                for (let panelIndex = 0; panelIndex < defaultPanelGroups.length; panelIndex += 1) {
+                    slideElement.appendChild(createPanelElement(slide, panelIndex));
+                }
+
+                sliderContainer.appendChild(slideElement);
+            });
+
+            slideElements = Array.from(document.querySelectorAll('.slide'));
+            sliderBar.max = String(Math.max(slideData.length - 1, 0));
+            sliderBar.value = String(currentSlideIndex);
+
+            if (slideElements.length) {
+                showSlide(currentSlideIndex);
+            } else {
+                forecastHour.textContent = 'Forecast Hour: N/A';
+            }
         }
 
         function buildImageUrl(group, image) {
@@ -317,10 +419,11 @@
         }
 
         function showSlide(index) {
+            currentSlideIndex = Math.min(index, Math.max(slideElements.length - 1, 0));
             slideElements.forEach((s, i) => s.classList.toggle('active', i === index));
-            const idx = slideElements[index] && slideElements[index].dataset.index ? slideElements[index].dataset.index : '';
+            const idx = slideElements[currentSlideIndex] && slideElements[currentSlideIndex].dataset.index ? slideElements[currentSlideIndex].dataset.index : '';
             forecastHour.textContent = `Forecast Hour: ${formatIndex(idx)}`;
-            updateSlidePanels(index);
+            updateSlidePanels(currentSlideIndex);
         }
 
         async function refreshSlideData() {
@@ -339,11 +442,13 @@
                 const nextSlides = Array.isArray(payload.slides) ? payload.slides : [];
                 const nextSignature = JSON.stringify(nextSlides);
                 if (nextSignature !== lastSlideSignature) {
-                    window.location.reload();
-                    return;
+                    slideData = nextSlides;
+                    lastSlideSignature = nextSignature;
+                    renderSlides();
+                } else {
+                    slideData = nextSlides;
+                    updateSlidePanels(currentSlideIndex);
                 }
-
-                slideData = nextSlides;
             } catch (error) {
                 console.error('Failed to refresh slide data', error);
             }
@@ -353,22 +458,9 @@
             showSlide(parseInt(event.target.value, 10));
         });
 
-        document.querySelectorAll('.panel-select').forEach((select) => {
-            const handlePanelSelection = (event) => {
-                const panelIndex = Number(event.target.dataset.panelIndex);
-                selectedGroups[panelIndex] = event.target.value;
-                saveSelectedGroups();
-                showSlide(parseInt(sliderBar.value, 10));
-            };
-
-            select.addEventListener('input', handlePanelSelection);
-            select.addEventListener('change', handlePanelSelection);
-        });
-
         // initialize
         saveSelectedGroups();
-        syncPanelSelects();
-        if (slideElements.length) showSlide(0);
+        renderSlides();
         window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
     </script>
 </body>
