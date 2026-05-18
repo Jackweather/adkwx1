@@ -69,7 +69,10 @@ PNG_DIRS = {
     "4_8_15": BASE_DIR / "4_8_15_GFS_OUTPUT" / "png",
     "3_12_18": BASE_DIR / "3_12_18_GFS_OUTPUT" / "png",
     "7_11": BASE_DIR / "7_11_GFS_OUTPUT" / "png",
+    "Main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
 }
+
+DEFAULT_PANEL_GROUPS = ["main_NWP", "5_6_10", "3_12_18", "7_11"]
 
 @app.route('/')
 def index():
@@ -106,7 +109,7 @@ def index():
         return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
     ordered_keys = sorted(all_keys, key=key_sort)
 
-    # create slides pairing four groups (use groups order from PNG_DIRS)
+    # create slides with all available groups while keeping a fixed four-panel layout
     groups = list(PNG_DIRS.keys())
     slides = []
     for k in ordered_keys:
@@ -116,7 +119,7 @@ def index():
         }
         slides.append(slide)
 
-    return render_template('index.html', slides=slides, groups=groups)
+    return render_template('index.html', slides=slides, groups=groups, default_panel_groups=DEFAULT_PANEL_GROUPS)
 
 @app.route('/pngs/<group>/<filename>')
 def serve_png(group, filename):
