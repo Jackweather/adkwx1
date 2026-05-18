@@ -402,12 +402,6 @@ def get_model_weights(gfs_run, icon_run, ecmwf_run, gdps_run):
         "gdps": 1.0,
     }
 
-    if gfs_run.hour in {6, 18}:
-        weights["gfs"] = 1.5
-        weights["icon"] = 1.5
-        weights["ecmwf"] = 0.5
-        weights["gdps"] = 0.5
-
     return weights
 
 
@@ -568,10 +562,7 @@ def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, gfs_run, icon_run, e
     snow_bar.set_label("Snow-zone PRATE mm/hr", fontsize=7)
     snow_bar.ax.tick_params(labelsize=6)
 
-    weight_text = (
-        f"Weights GFS {model_weights['gfs']:.1f} | ICON {model_weights['icon']:.1f} | "
-        f"ECMWF {model_weights['ecmwf']:.1f} | GDPS {model_weights['gdps']:.1f}"
-    )
+    weight_text = "Equal weights: GFS | ICON | ECMWF | GDPS"
 
     ax.set_title(
         (
