@@ -78,8 +78,7 @@
         .slide.active {
             display: grid;
             grid-template-columns: 1fr 1fr;
-            /* slightly smaller rows so panels are a bit reduced */
-            grid-template-rows: minmax(320px, 1fr) minmax(320px, 1fr);
+            grid-auto-rows: minmax(320px, 1fr);
             gap: 10px;
             align-items: stretch;
         }
@@ -97,11 +96,18 @@
             overflow: hidden;
             min-height: 320px; /* reduced size */
         }
-        .panel-label {
+        .panel-header {
             position: absolute;
             top: 8px;
             left: 8px;
-            z-index: 1;
+            right: 8px;
+            z-index: 2;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 10px;
+        }
+        .panel-label {
             padding: 6px 10px;
             border-radius: 999px;
             background: var(--label-bg);
@@ -111,12 +117,26 @@
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }
+        .panel-select {
+            min-width: 108px;
+            border: 1px solid rgba(15, 59, 82, 0.16);
+            border-radius: 999px;
+            padding: 6px 10px;
+            background: rgba(255, 255, 255, 0.94);
+            color: var(--text);
+            font-size: 12px;
+            font-weight: 600;
+        }
         /* let PNGs fill the panel as much as possible while preserving aspect */
         .panel img {
             width: 100%;
             height: 100%;
             object-fit: contain;
             display: block;
+        }
+        .panel img.is-hidden,
+        .empty.is-hidden {
+            display: none;
         }
         .empty {
             color: var(--muted);
@@ -147,17 +167,17 @@
 
         @media (max-width: 1100px) {
             .left-side { display: none; }
-            .slide.active { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(260px, auto) minmax(260px, auto); }
+            .slide.active { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(260px, auto); }
             .panel { min-height: 260px; }
         }
         /* keep 2x2 on small phones like iPhone, reduce heights so it fits */
         @media (max-width: 420px) {
             .left-side { display: none; }
-            .slide.active { grid-template-columns: 1fr 1fr; grid-template-rows: minmax(160px, auto) minmax(160px, auto); gap:8px; }
+            .slide.active { grid-template-columns: 1fr; grid-auto-rows: minmax(160px, auto); gap:8px; }
             .panel { min-height: 160px; padding:4px; }
         }
         @media (max-width: 320px) {
-            .slide.active { grid-template-rows: minmax(140px, auto) minmax(140px, auto); }
+            .slide.active { grid-auto-rows: minmax(140px, auto); }
             .panel { min-height: 140px; }
         }
     </style>
@@ -172,16 +192,24 @@
             <div class="slider-container">
                 {% for slide in slides %}
                 <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ slide.index }}">
-                    {# render panels in the same order as groups in app.py #}
-                    {% for group in groups %}
+                    {% for group in default_panel_groups %}
+                    {% set panel_index = loop.index0 %}
                     {% set image = slide.images.get(group) %}
-                    <div class="panel">
-                        <div class="panel-label">{{ group }}</div>
-                        {% if image %}
-                        <img src="{{ url_for('serve_png', group=group, filename=image.filename, v=image.version) }}" alt="Forecast {{ group }}">
-                        {% else %}
-                        <div class="empty">No image for {{ group }}</div>
-                        {% endif %}
+                    <div class="panel" data-panel-index="{{ panel_index }}">
+                        <div class="panel-header">
+                            <div class="panel-label">Panel {{ panel_index + 1 }}</div>
+                            <select class="panel-select" data-panel-index="{{ panel_index }}" aria-label="Choose image for panel {{ panel_index + 1 }}">
+                                {% for option_group in groups %}
+                                <option value="{{ option_group }}"{% if option_group == group %} selected{% endif %}>{{ option_group }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <img
+                            {% if image %}src="{{ url_for('serve_png', group=group, filename=image.filename, v=image.version) }}"{% endif %}
+                            alt="Forecast {{ group }}"
+                            class="panel-image{% if not image %} is-hidden{% endif %}"
+                        >
+                        <div class="empty{% if image %} is-hidden{% endif %}">No image for {{ group }}</div>
                     </div>
                     {% endfor %}
                 </div>
@@ -193,27 +221,75 @@
             </div>
         </div>
     </div>
+    <script id="slideData" type="application/json">{{ slides | tojson }}</script>
     <script>
-        const slides = Array.from(document.querySelectorAll('.slide'));
+        const slideElements = Array.from(document.querySelectorAll('.slide'));
+        const slideDataElement = document.getElementById('slideData');
+        const slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
+
+        function buildImageUrl(group, image) {
+            const filename = encodeURIComponent(image.filename);
+            return `/pngs/${encodeURIComponent(group)}/${filename}?v=${encodeURIComponent(image.version)}`;
+        }
+
+        function updateSlidePanels(index) {
+            const slide = slideElements[index];
+            const data = slideData[index];
+            if (!slide || !data) {
+                return;
+            }
+
+            slide.querySelectorAll('.panel').forEach((panel) => {
+                const panelSelect = panel.querySelector('.panel-select');
+                const selectedGroup = panelSelect ? panelSelect.value : null;
+                const imageData = selectedGroup ? data.images[selectedGroup] : null;
+                const image = panel.querySelector('.panel-image');
+                const empty = panel.querySelector('.empty');
+
+                if (!selectedGroup || !image || !empty) {
+                    return;
+                }
+
+                empty.textContent = `No image for ${selectedGroup}`;
+                image.alt = `Forecast ${selectedGroup}`;
+
+                if (imageData) {
+                    image.src = buildImageUrl(selectedGroup, imageData);
+                    image.classList.remove('is-hidden');
+                    empty.classList.add('is-hidden');
+                } else {
+                    image.removeAttribute('src');
+                    image.classList.add('is-hidden');
+                    empty.classList.remove('is-hidden');
+                }
+            });
+        }
 
         function formatIndex(idx) {
             return (/^\d+$/).test(idx) ? String(idx).padStart(3,'0') : idx;
         }
 
         function showSlide(index) {
-            slides.forEach((s, i) => s.classList.toggle('active', i === index));
-            const idx = slides[index] && slides[index].dataset.index ? slides[index].dataset.index : '';
+            slideElements.forEach((s, i) => s.classList.toggle('active', i === index));
+            const idx = slideElements[index] && slideElements[index].dataset.index ? slideElements[index].dataset.index : '';
             forecastHour.textContent = `Forecast Hour: ${formatIndex(idx)}`;
+            updateSlidePanels(index);
         }
 
         sliderBar.addEventListener('input', (event) => {
             showSlide(parseInt(event.target.value, 10));
         });
 
+        document.querySelectorAll('.panel-select').forEach((select) => {
+            select.addEventListener('change', () => {
+                showSlide(parseInt(sliderBar.value, 10));
+            });
+        });
+
         // initialize
-        if (slides.length) showSlide(0);
+        if (slideElements.length) showSlide(0);
     </script>
 </body>
 </html>
