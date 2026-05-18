@@ -158,9 +158,17 @@ def run_task1():
         ("/opt/render/project/src/gefs_gfs/4_8_15_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ("/opt/render/project/src/gefs_gfs/7_11_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
         ("/opt/render/project/src/gefs_gfs/3_12_18_GFS_prate.py", "/opt/render/project/src/gefs_gfs"),
-        ('/opt/render/project/src/main_models_run/prate_type_with_gfs_euro.py', "/opt/render/project/src/main_models_run"),
     ]
     threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
+    return "Task started in background! Check logs folder for output.", 200
+
+
+@app.route("/run-task2")
+def run_task2():
+    scripts = [
+        ("/opt/render/project/src/main_models_run/prate_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
+    ]
+    threading.Thread(target=lambda: run_scripts(scripts, 1)).start()
     return "Task started in background! Check logs folder for output.", 200
 
 if __name__ == '__main__':
