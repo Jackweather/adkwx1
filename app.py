@@ -72,7 +72,7 @@ PNG_DIRS = {
     "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
 }
 
-DEFAULT_PANEL_GROUPS = ["5_6_10", "main_NWP", "3_12_18", "7_11"]
+DEFAULT_PANEL_GROUPS = ["main_NWP", "5_6_10", "3_12_18", "7_11"]
 
 
 def build_slide_payload():
