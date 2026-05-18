@@ -29,7 +29,6 @@ GRIB_DIR = BASE_DIR / "grib"
 PNG_DIR = BASE_DIR / "png"
 LOG_FILE = BASE_DIR / "errors_euro_gfs_prate.txt"
 
-FORECAST_STEPS = list(range(6, 187, 6))
 MAX_DOWNLOAD_RETRIES = 3
 LOCAL_TZ = ZoneInfo("America/New_York")
 GFS_FILTER_URL = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
@@ -55,6 +54,12 @@ SNOW_COLORS = [
 SNOW_CMAP = ListedColormap(SNOW_COLORS)
 SNOW_NORM = BoundaryNorm(PRATE_LEVELS, SNOW_CMAP.N, clip=False)
 MSLP_LEVELS = np.arange(960, 1060, 4)
+
+
+def get_forecast_steps(run_hour):
+    run_hour_int = int(run_hour)
+    max_forecast_hour = 120 if run_hour_int in {6, 18} else 180
+    return list(range(6, max_forecast_hour + 1, 6))
 
 
 def prepare_output_dirs():
@@ -590,6 +595,8 @@ def main():
 
     gfs_run_date, gfs_run_hour = find_latest_gfs_run()
     gfs_run = datetime.strptime(f"{gfs_run_date} {gfs_run_hour}", "%Y%m%d %H").replace(tzinfo=timezone.utc)
+    forecast_steps = get_forecast_steps(gfs_run_hour)
+    print(f"Processing forecast hours through FH{forecast_steps[-1]:03d} for GFS {gfs_run_hour}Z")
     icon_run_date, icon_run_hour = find_latest_icon_run()
     icon_run = datetime.strptime(f"{icon_run_date} {icon_run_hour}", "%Y%m%d %H").replace(tzinfo=timezone.utc)
     gdps_run_date, gdps_run_hour = find_latest_gdps_run()
@@ -622,7 +629,7 @@ def main():
     previous_icon_snow = None
     icon_indexer = None
 
-    for forecast_hour in FORECAST_STEPS:
+    for forecast_hour in forecast_steps:
         step_str = f"{forecast_hour:03d}"
         gfs_prate_path = GRIB_DIR / f"gfs_prate_f{step_str}.grib2"
         gfs_mslp_path = GRIB_DIR / f"gfs_mslp_f{step_str}.grib2"
