@@ -71,6 +71,61 @@
             min-width: 0;
             min-height: 0;
         }
+        .view-toolbar {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 12px;
+            padding: 14px 18px 0;
+            flex-wrap: wrap;
+        }
+        .view-control {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 12px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.82);
+            border: 1px solid var(--surface-border);
+            box-shadow: 0 10px 24px rgba(24, 48, 66, 0.08);
+        }
+        .view-control-label {
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+            color: var(--accent-strong);
+        }
+        .view-select {
+            min-width: 180px;
+            border: 1px solid rgba(15, 59, 82, 0.16);
+            border-radius: 999px;
+            padding: 8px 12px;
+            background: rgba(255, 255, 255, 0.96);
+            color: var(--text);
+            font-size: 13px;
+            font-weight: 600;
+        }
+        .compare-toggle {
+            border: 1px solid rgba(15, 59, 82, 0.16);
+            border-radius: 999px;
+            padding: 10px 16px;
+            background: rgba(255, 255, 255, 0.92);
+            color: var(--accent-strong);
+            font-size: 13px;
+            font-weight: 700;
+            cursor: pointer;
+            transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+        }
+        .compare-toggle.is-active {
+            background: var(--accent-strong);
+            color: white;
+            border-color: var(--accent-strong);
+        }
+        .compare-toggle:disabled {
+            opacity: 0.55;
+            cursor: default;
+        }
         /* slide holder */
         .slider-container {
             flex: 1;
@@ -89,11 +144,13 @@
         }
         .slide.active {
             display: grid;
-            grid-template-columns: 1fr 1fr;
-            grid-template-rows: repeat(2, minmax(0, 1fr));
+            grid-template-columns: minmax(0, 1fr);
             grid-auto-rows: minmax(0, 1fr);
-            gap: 10px;
+            gap: 12px;
             align-items: stretch;
+        }
+        .slide.active.is-compare {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
         }
         .panel {
             position: relative;
@@ -103,22 +160,21 @@
             box-shadow: var(--shadow);
             backdrop-filter: blur(12px);
             display: flex;
-            align-items: center;
-            justify-content: center;
+            flex-direction: column;
+            align-items: stretch;
+            justify-content: flex-start;
             padding: 10px;
             overflow: hidden;
             min-height: 320px; /* reduced size */
         }
         .panel-header {
-            position: absolute;
-            top: 8px;
-            left: 8px;
-            right: 8px;
-            z-index: 2;
+            position: relative;
+            z-index: 1;
             display: flex;
             align-items: center;
-            justify-content: space-between;
+            justify-content: flex-start;
             gap: 10px;
+            margin-bottom: 8px;
         }
         .panel-label {
             padding: 6px 10px;
@@ -130,20 +186,12 @@
             letter-spacing: 0.08em;
             text-transform: uppercase;
         }
-        .panel-select {
-            min-width: 108px;
-            border: 1px solid rgba(15, 59, 82, 0.16);
-            border-radius: 999px;
-            padding: 6px 10px;
-            background: rgba(255, 255, 255, 0.94);
-            color: var(--text);
-            font-size: 12px;
-            font-weight: 600;
-        }
         /* let PNGs fill the panel as much as possible while preserving aspect */
         .panel img {
+            flex: 1;
             width: 100%;
-            height: 100%;
+            height: auto;
+            min-height: 0;
             object-fit: contain;
             display: block;
         }
@@ -152,6 +200,10 @@
             display: none;
         }
         .empty {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
             color: var(--muted);
             font-size: 14px;
             padding: 20px;
@@ -187,9 +239,12 @@
                 justify-content: center;
             }
             .slide.active {
-                width: min(100%, 1320px);
+                width: min(100%, 820px);
                 height: min(100%, calc(100dvh - var(--header-height) - var(--controls-height) - 48px));
                 margin: 0 auto;
+            }
+            .slide.active.is-compare {
+                width: min(100%, 1280px);
             }
             .panel {
                 min-height: 240px;
@@ -198,7 +253,8 @@
 
         @media (max-width: 1100px) {
             .left-side { display: none; }
-            .slide.active { grid-template-columns: 1fr 1fr; grid-auto-rows: minmax(260px, auto); }
+            .slide.active { grid-auto-rows: minmax(260px, auto); }
+            .slide.active.is-compare { grid-template-columns: 1fr 1fr; }
             .panel { min-height: 260px; }
         }
         @media (max-width: 820px) {
@@ -221,6 +277,21 @@
                 padding: 12px;
                 overflow: hidden;
             }
+            .view-toolbar {
+                padding: 12px 12px 0;
+                gap: 8px;
+            }
+            .view-control {
+                width: 100%;
+                justify-content: space-between;
+            }
+            .view-select {
+                min-width: 0;
+                flex: 1;
+            }
+            .compare-toggle {
+                width: 100%;
+            }
             .slider-controls {
                 padding: 12px;
             }
@@ -228,23 +299,22 @@
                 width: 100%;
             }
             .slide.active {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                grid-template-rows: repeat(2, minmax(0, 1fr));
+                grid-template-columns: minmax(0, 1fr);
+                grid-template-rows: minmax(0, 1fr);
                 grid-auto-rows: auto;
                 height: calc(100dvh - var(--header-height) - var(--controls-height) - 24px);
+            }
+            .slide.active.is-compare {
+                grid-template-columns: 1fr;
+                grid-template-rows: repeat(2, minmax(0, 1fr));
             }
             .panel {
                 min-height: 0;
             }
             .panel-header {
-                flex-wrap: nowrap;
+                flex-wrap: wrap;
                 align-items: center;
                 gap: 6px;
-            }
-            .panel-select {
-                min-width: 0;
-                width: auto;
-                max-width: 58%;
             }
         }
         @media (max-width: 820px) and (orientation: landscape) {
@@ -275,11 +345,14 @@
                 padding: 6px;
             }
             .slide.active {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-                grid-template-rows: repeat(2, minmax(0, 1fr));
+                grid-template-columns: 1fr;
+                grid-template-rows: minmax(0, 1fr);
                 grid-auto-rows: auto;
                 gap: 6px;
                 height: calc(100svh - var(--header-height) - var(--controls-height) - 12px - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+            }
+            .slide.active.is-compare {
+                grid-template-rows: repeat(2, minmax(0, 1fr));
             }
             .panel {
                 min-height: 0;
@@ -287,19 +360,23 @@
                 border-radius: 14px;
             }
             .panel-header {
-                top: 6px;
-                left: 6px;
-                right: 6px;
                 gap: 4px;
+                margin-bottom: 6px;
             }
             .panel-label {
                 font-size: 10px;
                 padding: 4px 6px;
             }
-            .panel-select {
-                max-width: 56%;
+            .view-control {
+                padding: 6px 10px;
+            }
+            .view-control-label {
                 font-size: 10px;
-                padding: 4px 6px;
+            }
+            .view-select,
+            .compare-toggle {
+                font-size: 10px;
+                padding: 6px 8px;
             }
             .slider-controls {
                 padding-top: 8px;
@@ -324,7 +401,9 @@
                 min-height: 0;
             }
             .panel-label,
-            .panel-select {
+            .view-control-label,
+            .view-select,
+            .compare-toggle {
                 font-size: 9px;
             }
         }
@@ -337,29 +416,33 @@
             <!-- empty left area -->
         </div>
         <div class="main-content">
+            <div class="view-toolbar">
+                <label class="view-control" for="primaryGroupSelect">
+                    <span class="view-control-label">Main View</span>
+                    <select id="primaryGroupSelect" class="view-select" aria-label="Choose main image">
+                        {% for group in groups %}
+                        <option value="{{ group }}"{% if group == default_panel_groups[0] %} selected{% endif %}>{{ group }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
+                <button type="button" class="compare-toggle" id="compareToggle">Compare to Main NWP</button>
+            </div>
             <div class="slider-container">
                 {% for slide in slides %}
                 <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ slide.index }}">
-                    {% for group in default_panel_groups %}
-                    {% set panel_index = loop.index0 %}
-                    {% set image = slide.images.get(group) %}
-                    <div class="panel" data-panel-index="{{ panel_index }}">
+                    {% set primary_group = default_panel_groups[0] %}
+                    {% set image = slide.images.get(primary_group) %}
+                    <div class="panel" data-group="{{ primary_group }}">
                         <div class="panel-header">
-                            <div class="panel-label">Panel {{ panel_index + 1 }}</div>
-                            <select class="panel-select" data-panel-index="{{ panel_index }}" aria-label="Choose image for panel {{ panel_index + 1 }}">
-                                {% for option_group in groups %}
-                                <option value="{{ option_group }}"{% if option_group == group %} selected{% endif %}>{{ option_group }}</option>
-                                {% endfor %}
-                            </select>
+                            <div class="panel-label">{{ primary_group }}</div>
                         </div>
                         <img
-                            {% if image %}src="{{ url_for('serve_png', group=group, filename=image.filename, v=image.version) }}"{% endif %}
-                            alt="Forecast {{ group }}"
+                            {% if image %}src="{{ url_for('serve_png', group=primary_group, filename=image.filename, v=image.version) }}"{% endif %}
+                            alt="Forecast {{ primary_group }}"
                             class="panel-image{% if not image %} is-hidden{% endif %}"
                         >
-                        <div class="empty{% if image %} is-hidden{% endif %}">No image for {{ group }}</div>
+                        <div class="empty{% if image %} is-hidden{% endif %}">No image for {{ primary_group }}</div>
                     </div>
-                    {% endfor %}
                 </div>
                 {% endfor %}
             </div>
@@ -373,109 +456,116 @@
     <script id="defaultPanelGroups" type="application/json">{{ default_panel_groups | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
-        const allGroups = Array.from(
-            new Set(
-                Array.from(document.querySelectorAll('.panel-select option')).map((option) => option.value)
-            )
-        );
         const slideDataElement = document.getElementById('slideData');
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
+        const primaryGroupSelect = document.getElementById('primaryGroupSelect');
+        const compareToggle = document.getElementById('compareToggle');
+        const COMPARE_GROUP = 'main_NWP';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
+        const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
+        const DEFAULT_PRIMARY_GROUP = defaultPanelGroups.find((group) => group !== COMPARE_GROUP) || defaultPanelGroups[0] || allGroups[0] || '';
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
         let lastSlideSignature = JSON.stringify(slideData);
         const REFRESH_INTERVAL_MS = 30000;
-        const PANEL_SELECTIONS_KEY = 'adkwx-panel-selections-v2';
-        let selectedGroups = loadSelectedGroups();
+        const PRIMARY_GROUP_KEY = 'adkwx-primary-group-v1';
+        const COMPARE_MODE_KEY = 'adkwx-compare-main-nwp-v1';
+        let selectedPrimaryGroup = loadSelectedPrimaryGroup();
+        let compareWithMainNwp = loadCompareMode();
         let slideElements = [];
         let currentSlideIndex = 0;
 
-        function loadSelectedGroups() {
+        function loadSelectedPrimaryGroup() {
             try {
-                const savedSelections = JSON.parse(window.localStorage.getItem(PANEL_SELECTIONS_KEY) || 'null');
-                if (Array.isArray(savedSelections) && savedSelections.length === defaultPanelGroups.length) {
-                    return savedSelections;
+                const savedGroup = window.localStorage.getItem(PRIMARY_GROUP_KEY);
+                if (savedGroup && allGroups.includes(savedGroup)) {
+                    return savedGroup;
                 }
             } catch (error) {
-                console.warn('Failed to load saved panel selections', error);
+                console.warn('Failed to load saved primary group', error);
             }
-            return [...defaultPanelGroups];
+            return DEFAULT_PRIMARY_GROUP;
         }
 
-        function saveSelectedGroups() {
+        function saveSelectedPrimaryGroup() {
             try {
-                window.localStorage.setItem(PANEL_SELECTIONS_KEY, JSON.stringify(selectedGroups));
+                window.localStorage.setItem(PRIMARY_GROUP_KEY, selectedPrimaryGroup);
             } catch (error) {
-                console.warn('Failed to save panel selections', error);
+                console.warn('Failed to save primary group', error);
             }
         }
 
-        function syncPanelSelects() {
-            document.querySelectorAll('.panel').forEach((panel) => {
-                const panelIndex = Number(panel.dataset.panelIndex);
-                const panelSelect = panel.querySelector('.panel-select');
-                const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || '';
-                if (panelSelect && panelSelect.value !== selectedGroup) {
-                    panelSelect.value = selectedGroup;
-                }
-            });
+        function loadCompareMode() {
+            try {
+                return window.localStorage.getItem(COMPARE_MODE_KEY) === 'true';
+            } catch (error) {
+                console.warn('Failed to load compare mode', error);
+                return false;
+            }
         }
 
-        function attachPanelSelectionHandler(select) {
-            const handlePanelSelection = (event) => {
-                const panelIndex = Number(event.target.dataset.panelIndex);
-                selectedGroups[panelIndex] = event.target.value;
-                saveSelectedGroups();
-                renderSlides();
-            };
-
-            select.addEventListener('input', handlePanelSelection);
-            select.addEventListener('change', handlePanelSelection);
+        function saveCompareMode() {
+            try {
+                window.localStorage.setItem(COMPARE_MODE_KEY, String(compareWithMainNwp));
+            } catch (error) {
+                console.warn('Failed to save compare mode', error);
+            }
         }
 
-        function createPanelElement(slide, panelIndex) {
-            const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || '';
-            const imageData = selectedGroup ? slide.images[selectedGroup] : null;
+        function formatGroupLabel(group) {
+            if (group === 'main_NWP') {
+                return 'Main NWP';
+            }
+            return group.replaceAll('_', ' / ');
+        }
+
+        function syncToolbarControls() {
+            if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
+                primaryGroupSelect.value = selectedPrimaryGroup;
+            }
+
+            const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
+            if (compareDisabled) {
+                compareWithMainNwp = false;
+            }
+
+            if (compareToggle) {
+                compareToggle.disabled = compareDisabled;
+                compareToggle.classList.toggle('is-active', compareWithMainNwp && !compareDisabled);
+                compareToggle.textContent = compareDisabled
+                    ? 'Compare unavailable for Main NWP'
+                    : (compareWithMainNwp ? 'Hide Main NWP Compare' : 'Compare to Main NWP');
+                compareToggle.setAttribute('aria-pressed', String(compareWithMainNwp && !compareDisabled));
+            }
+        }
+
+        function createPanelElement(slide, group) {
+            const imageData = group ? slide.images[group] : null;
 
             const panel = document.createElement('div');
             panel.className = 'panel';
-            panel.dataset.panelIndex = String(panelIndex);
+            panel.dataset.group = group;
 
             const panelHeader = document.createElement('div');
             panelHeader.className = 'panel-header';
 
             const panelLabel = document.createElement('div');
             panelLabel.className = 'panel-label';
-            panelLabel.textContent = `Panel ${panelIndex + 1}`;
-
-            const panelSelect = document.createElement('select');
-            panelSelect.className = 'panel-select';
-            panelSelect.dataset.panelIndex = String(panelIndex);
-            panelSelect.setAttribute('aria-label', `Choose image for panel ${panelIndex + 1}`);
-
-            allGroups.forEach((group) => {
-                const option = document.createElement('option');
-                option.value = group;
-                option.textContent = group;
-                option.selected = group === selectedGroup;
-                panelSelect.appendChild(option);
-            });
-            attachPanelSelectionHandler(panelSelect);
+            panelLabel.textContent = formatGroupLabel(group);
 
             panelHeader.appendChild(panelLabel);
-            panelHeader.appendChild(panelSelect);
 
             const image = document.createElement('img');
             image.className = 'panel-image';
-            image.alt = `Forecast ${selectedGroup}`;
+            image.alt = `Forecast ${formatGroupLabel(group)}`;
 
             const empty = document.createElement('div');
             empty.className = 'empty';
-            empty.textContent = `No image for ${selectedGroup}`;
+            empty.textContent = `No image for ${formatGroupLabel(group)}`;
 
             if (imageData) {
-                image.src = buildImageUrl(selectedGroup, imageData);
+                image.src = buildImageUrl(group, imageData);
                 empty.classList.add('is-hidden');
             } else {
                 image.classList.add('is-hidden');
@@ -487,7 +577,24 @@
             return panel;
         }
 
+        function updateSlidePanels(index) {
+            const slide = slideElements[index];
+            const data = slideData[index];
+            if (!slide || !data) {
+                return;
+            }
+
+            slide.innerHTML = '';
+            slide.classList.toggle('is-compare', compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP);
+            slide.appendChild(createPanelElement(data, selectedPrimaryGroup));
+
+            if (compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP) {
+                slide.appendChild(createPanelElement(data, COMPARE_GROUP));
+            }
+        }
+
         function renderSlides() {
+            syncToolbarControls();
             currentSlideIndex = Math.min(currentSlideIndex, Math.max(slideData.length - 1, 0));
             sliderContainer.innerHTML = '';
 
@@ -497,10 +604,6 @@
                 slideElement.dataset.index = slide.index;
                 if (index === currentSlideIndex) {
                     slideElement.classList.add('active');
-                }
-
-                for (let panelIndex = 0; panelIndex < defaultPanelGroups.length; panelIndex += 1) {
-                    slideElement.appendChild(createPanelElement(slide, panelIndex));
                 }
 
                 sliderContainer.appendChild(slideElement);
@@ -529,37 +632,13 @@
                 return;
             }
 
-            syncPanelSelects();
+            slide.innerHTML = '';
+            slide.classList.toggle('is-compare', compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP);
+            slide.appendChild(createPanelElement(data, selectedPrimaryGroup));
 
-            slide.querySelectorAll('.panel').forEach((panel) => {
-                const panelIndex = Number(panel.dataset.panelIndex);
-                const panelSelect = panel.querySelector('.panel-select');
-                const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || null;
-                const imageData = selectedGroup ? data.images[selectedGroup] : null;
-                const image = panel.querySelector('.panel-image');
-                const empty = panel.querySelector('.empty');
-
-                if (!selectedGroup || !image || !empty) {
-                    return;
-                }
-
-                if (panelSelect) {
-                    panelSelect.value = selectedGroup;
-                }
-
-                empty.textContent = `No image for ${selectedGroup}`;
-                image.alt = `Forecast ${selectedGroup}`;
-
-                if (imageData) {
-                    image.src = buildImageUrl(selectedGroup, imageData);
-                    image.classList.remove('is-hidden');
-                    empty.classList.add('is-hidden');
-                } else {
-                    image.removeAttribute('src');
-                    image.classList.add('is-hidden');
-                    empty.classList.remove('is-hidden');
-                }
-            });
+            if (compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP) {
+                slide.appendChild(createPanelElement(data, COMPARE_GROUP));
+            }
         }
 
         function formatIndex(idx) {
@@ -606,8 +685,32 @@
             showSlide(parseInt(event.target.value, 10));
         });
 
+        if (primaryGroupSelect) {
+            primaryGroupSelect.addEventListener('input', (event) => {
+                selectedPrimaryGroup = event.target.value;
+                if (selectedPrimaryGroup === COMPARE_GROUP) {
+                    compareWithMainNwp = false;
+                }
+                saveSelectedPrimaryGroup();
+                saveCompareMode();
+                renderSlides();
+            });
+        }
+
+        if (compareToggle) {
+            compareToggle.addEventListener('click', () => {
+                if (selectedPrimaryGroup === COMPARE_GROUP) {
+                    return;
+                }
+                compareWithMainNwp = !compareWithMainNwp;
+                saveCompareMode();
+                renderSlides();
+            });
+        }
+
         // initialize
-        saveSelectedGroups();
+        saveSelectedPrimaryGroup();
+        saveCompareMode();
         renderSlides();
         window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
     </script>
