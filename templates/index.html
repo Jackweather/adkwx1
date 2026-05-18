@@ -222,12 +222,50 @@
         </div>
     </div>
     <script id="slideData" type="application/json">{{ slides | tojson }}</script>
+    <script id="defaultPanelGroups" type="application/json">{{ default_panel_groups | tojson }}</script>
     <script>
         const slideElements = Array.from(document.querySelectorAll('.slide'));
         const slideDataElement = document.getElementById('slideData');
-        const slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
+        const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
+        let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
+        const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
+        let lastSlideSignature = JSON.stringify(slideData);
+        const REFRESH_INTERVAL_MS = 30000;
+        const PANEL_SELECTIONS_KEY = 'adkwx-panel-selections-v2';
+        let selectedGroups = loadSelectedGroups();
+
+        function loadSelectedGroups() {
+            try {
+                const savedSelections = JSON.parse(window.localStorage.getItem(PANEL_SELECTIONS_KEY) || 'null');
+                if (Array.isArray(savedSelections) && savedSelections.length === defaultPanelGroups.length) {
+                    return savedSelections;
+                }
+            } catch (error) {
+                console.warn('Failed to load saved panel selections', error);
+            }
+            return [...defaultPanelGroups];
+        }
+
+        function saveSelectedGroups() {
+            try {
+                window.localStorage.setItem(PANEL_SELECTIONS_KEY, JSON.stringify(selectedGroups));
+            } catch (error) {
+                console.warn('Failed to save panel selections', error);
+            }
+        }
+
+        function syncPanelSelects() {
+            document.querySelectorAll('.panel').forEach((panel) => {
+                const panelIndex = Number(panel.dataset.panelIndex);
+                const panelSelect = panel.querySelector('.panel-select');
+                const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || '';
+                if (panelSelect && panelSelect.value !== selectedGroup) {
+                    panelSelect.value = selectedGroup;
+                }
+            });
+        }
 
         function buildImageUrl(group, image) {
             const filename = encodeURIComponent(image.filename);
@@ -241,15 +279,22 @@
                 return;
             }
 
+            syncPanelSelects();
+
             slide.querySelectorAll('.panel').forEach((panel) => {
+                const panelIndex = Number(panel.dataset.panelIndex);
                 const panelSelect = panel.querySelector('.panel-select');
-                const selectedGroup = panelSelect ? panelSelect.value : null;
+                const selectedGroup = selectedGroups[panelIndex] || defaultPanelGroups[panelIndex] || null;
                 const imageData = selectedGroup ? data.images[selectedGroup] : null;
                 const image = panel.querySelector('.panel-image');
                 const empty = panel.querySelector('.empty');
 
                 if (!selectedGroup || !image || !empty) {
                     return;
+                }
+
+                if (panelSelect) {
+                    panelSelect.value = selectedGroup;
                 }
 
                 empty.textContent = `No image for ${selectedGroup}`;
@@ -278,18 +323,53 @@
             updateSlidePanels(index);
         }
 
+        async function refreshSlideData() {
+            try {
+                const response = await fetch('/slide-data', {
+                    cache: 'no-store',
+                    headers: {
+                        'Cache-Control': 'no-cache'
+                    }
+                });
+                if (!response.ok) {
+                    return;
+                }
+
+                const payload = await response.json();
+                const nextSlides = Array.isArray(payload.slides) ? payload.slides : [];
+                const nextSignature = JSON.stringify(nextSlides);
+                if (nextSignature !== lastSlideSignature) {
+                    window.location.reload();
+                    return;
+                }
+
+                slideData = nextSlides;
+            } catch (error) {
+                console.error('Failed to refresh slide data', error);
+            }
+        }
+
         sliderBar.addEventListener('input', (event) => {
             showSlide(parseInt(event.target.value, 10));
         });
 
         document.querySelectorAll('.panel-select').forEach((select) => {
-            select.addEventListener('change', () => {
+            const handlePanelSelection = (event) => {
+                const panelIndex = Number(event.target.dataset.panelIndex);
+                selectedGroups[panelIndex] = event.target.value;
+                saveSelectedGroups();
                 showSlide(parseInt(sliderBar.value, 10));
-            });
+            };
+
+            select.addEventListener('input', handlePanelSelection);
+            select.addEventListener('change', handlePanelSelection);
         });
 
         // initialize
+        saveSelectedGroups();
+        syncPanelSelects();
         if (slideElements.length) showSlide(0);
+        window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
     </script>
 </body>
 </html>
