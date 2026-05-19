@@ -56,10 +56,21 @@ SNOW_NORM = BoundaryNorm(PRATE_LEVELS, SNOW_CMAP.N, clip=False)
 MSLP_LEVELS = np.arange(960, 1060, 4)
 
 
-def get_forecast_steps(run_hour):
+def get_run_configuration(run_hour):
     run_hour_int = int(run_hour)
-    max_forecast_hour = 120 if run_hour_int in {6, 18} else 180
-    return list(range(6, max_forecast_hour + 1, 6))
+    is_primary_cycle = run_hour_int in {0, 12}
+    return {
+        "blend_max_hour": 240 if is_primary_cycle else 144,
+        "gfs_max_hour": 384,
+        "ecmwf_max_hour": 360 if is_primary_cycle else 144,
+        "gdps_max_hour": 240,
+        "icon_max_hour": 180 if is_primary_cycle else 120,
+    }
+
+
+def get_forecast_steps(run_hour):
+    run_config = get_run_configuration(run_hour)
+    return list(range(6, run_config["blend_max_hour"] + 1, 6))
 
 
 def prepare_output_dirs():
@@ -405,6 +416,24 @@ def get_model_weights(gfs_run, icon_run, ecmwf_run, gdps_run):
     return weights
 
 
+def weighted_average_fields(weighted_fields, name):
+    total_weight = sum(weight for _, weight in weighted_fields)
+    if total_weight <= 0:
+        raise ValueError(f"No weighted fields available for {name}.")
+
+    template = weighted_fields[0][0]
+    weighted_sum = np.zeros_like(template.values, dtype=np.float32)
+    for field, weight in weighted_fields:
+        weighted_sum += field.values.astype(np.float32) * weight
+
+    return xr.DataArray(
+        weighted_sum / total_weight,
+        coords=template.coords,
+        dims=template.dims,
+        name=name,
+    )
+
+
 def plot_lows_highs(ax, lon2d, lat2d, data, extent, min_distance=5, edge_buffer=2):
     smoothed_data = gaussian_filter(data, sigma=3)
     local_min = minimum_filter(smoothed_data, size=10) == smoothed_data
@@ -478,7 +507,8 @@ def plot_lows_highs(ax, lon2d, lat2d, data, extent, min_distance=5, edge_buffer=
         value_text.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
 
 
-def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, gfs_run, icon_run, ecmwf_run, gdps_run, model_weights, forecast_hour, step_str):
+def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, forecast_hour, step_str):
+    gfs_run = available_runs[0][1]
     valid_utc, local_time, local_day = format_valid_time(gfs_run, forecast_hour)
     lon2d, lat2d = np.meshgrid(avg_prate.longitude.values, avg_prate.latitude.values)
 
@@ -562,13 +592,15 @@ def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, gfs_run, icon_run, e
     snow_bar.set_label("Snow-zone PRATE mm/hr", fontsize=7)
     snow_bar.ax.tick_params(labelsize=6)
 
-    weight_text = "Equal weights: GFS | ICON | ECMWF | GDPS"
+    model_text = " + ".join(name for name, _ in available_runs)
+    run_text = " | ".join(f"{name} {run_time:%HZ}" for name, run_time in available_runs)
+    weight_text = "Equal weights of available models"
 
     ax.set_title(
         (
-            f"GFS + ECMWF + ICON + GDPS precip/prate & MSLP | FH{step_str} | "
+            f"{model_text} precip/prate & MSLP | FH{step_str} | "
             f"Valid {valid_utc:%Y-%m-%d %HZ} ({local_time} ET, {local_day})\n"
-            f"Runs: GFS {gfs_run:%HZ} | ICON {icon_run:%HZ} | ECMWF {ecmwf_run:%HZ} | GDPS {gdps_run:%HZ}\n"
+            f"Runs: {run_text}\n"
             f"{weight_text}"
         ),
         fontsize=7,
@@ -586,8 +618,16 @@ def main():
 
     gfs_run_date, gfs_run_hour = find_latest_gfs_run()
     gfs_run = datetime.strptime(f"{gfs_run_date} {gfs_run_hour}", "%Y%m%d %H").replace(tzinfo=timezone.utc)
+    run_config = get_run_configuration(gfs_run_hour)
     forecast_steps = get_forecast_steps(gfs_run_hour)
     print(f"Processing forecast hours through FH{forecast_steps[-1]:03d} for GFS {gfs_run_hour}Z")
+    print(
+        "Blend limits | "
+        f"GFS: FH{run_config['gfs_max_hour']:03d} | "
+        f"ECMWF: FH{run_config['ecmwf_max_hour']:03d} | "
+        f"ICON: FH{run_config['icon_max_hour']:03d} | "
+        f"GDPS: FH{run_config['gdps_max_hour']:03d}"
+    )
     icon_run_date, icon_run_hour = find_latest_icon_run()
     icon_run = datetime.strptime(f"{icon_run_date} {icon_run_hour}", "%Y%m%d %H").replace(tzinfo=timezone.utc)
     gdps_run_date, gdps_run_hour = find_latest_gdps_run()
@@ -622,6 +662,10 @@ def main():
 
     for forecast_hour in forecast_steps:
         step_str = f"{forecast_hour:03d}"
+        ecmwf_available = forecast_hour <= run_config["ecmwf_max_hour"]
+        icon_available = forecast_hour <= run_config["icon_max_hour"]
+        gdps_available = forecast_hour <= run_config["gdps_max_hour"]
+
         gfs_prate_path = GRIB_DIR / f"gfs_prate_f{step_str}.grib2"
         gfs_mslp_path = GRIB_DIR / f"gfs_mslp_f{step_str}.grib2"
         gfs_csnow_path = GRIB_DIR / f"gfs_csnow_f{step_str}.grib2"
@@ -645,92 +689,109 @@ def main():
                 gfs_csnow_path,
                 f"GFS CSNOW FH{step_str}",
             )
+
+            if ecmwf_available:
+                ecmwf_client.retrieve(
+                    date=int(ecmwf_run.strftime("%Y%m%d")),
+                    time=ecmwf_run.hour,
+                    type="fc",
+                    step=forecast_hour,
+                    param=["msl", "tp", "sf"],
+                    target=str(ecmwf_path),
+                )
+
+            if icon_available:
+                download_bz2_file(
+                    build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
+                    icon_pmsl_path,
+                    f"ICON PMSL FH{step_str}",
+                )
+            if gdps_available:
+                download_file(
+                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
+                    gdps_mslp_path,
+                    f"GDPS MSLP FH{step_str}",
+                )
+
             if forecast_hour > 0:
+                if icon_available:
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "tot_prec", step_str, "TOT_PREC"),
+                        icon_tp_path,
+                        f"ICON TOT_PREC FH{step_str}",
+                    )
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "snow_gsp", step_str, "SNOW_GSP"),
+                        icon_snow_gsp_path,
+                        f"ICON SNOW_GSP FH{step_str}",
+                    )
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "snow_con", step_str, "SNOW_CON"),
+                        icon_snow_con_path,
+                        f"ICON SNOW_CON FH{step_str}",
+                    )
+                if gdps_available:
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Precip-Accum6h_Sfc"),
+                        gdps_precip_path,
+                        f"GDPS Precip FH{step_str}",
+                    )
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Snow-Accum6h_Sfc"),
+                        gdps_snow_path,
+                        f"GDPS Snow FH{step_str}",
+                    )
                 download_file(
                     build_gfs_url(gfs_run_date, gfs_run_hour, step_str, "var_PRATE=on&lev_surface=on"),
                     gfs_prate_path,
                     f"GFS PRATE FH{step_str}",
                 )
 
-            ecmwf_client.retrieve(
-                date=int(ecmwf_run.strftime("%Y%m%d")),
-                time=ecmwf_run.hour,
-                type="fc",
-                step=forecast_hour,
-                param=["msl", "tp", "sf"],
-                target=str(ecmwf_path),
-            )
-
-            download_bz2_file(
-                build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
-                icon_pmsl_path,
-                f"ICON PMSL FH{step_str}",
-            )
-            download_file(
-                build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
-                gdps_mslp_path,
-                f"GDPS MSLP FH{step_str}",
-            )
-            if forecast_hour > 0:
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "tot_prec", step_str, "TOT_PREC"),
-                    icon_tp_path,
-                    f"ICON TOT_PREC FH{step_str}",
-                )
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "snow_gsp", step_str, "SNOW_GSP"),
-                    icon_snow_gsp_path,
-                    f"ICON SNOW_GSP FH{step_str}",
-                )
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "snow_con", step_str, "SNOW_CON"),
-                    icon_snow_con_path,
-                    f"ICON SNOW_CON FH{step_str}",
-                )
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Precip-Accum6h_Sfc"),
-                    gdps_precip_path,
-                    f"GDPS Precip FH{step_str}",
-                )
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Snow-Accum6h_Sfc"),
-                    gdps_snow_path,
-                    f"GDPS Snow FH{step_str}",
-                )
-
             gfs_mslp = open_gfs_mslp(gfs_mslp_path)
             gfs_csnow = open_gfs_csnow(gfs_csnow_path)
-            if forecast_hour == 0:
-                gfs_prate = xr.zeros_like(gfs_mslp)
-            else:
-                gfs_prate = open_gfs_prate(gfs_prate_path)
+            gfs_prate = open_gfs_prate(gfs_prate_path)
 
-            ecmwf_mslp, ecmwf_tp_total, ecmwf_sf_total = open_ecmwf_fields(ecmwf_path)
-            ecmwf_mslp = regrid_to_gfs(ecmwf_mslp, gfs_mslp)
-            ecmwf_tp_total = regrid_to_gfs(ecmwf_tp_total, gfs_mslp)
-            ecmwf_sf_total = regrid_to_gfs(ecmwf_sf_total, gfs_mslp)
+            if ecmwf_available:
+                ecmwf_mslp, ecmwf_tp_total, ecmwf_sf_total = open_ecmwf_fields(ecmwf_path)
+                ecmwf_mslp = regrid_to_gfs(ecmwf_mslp, gfs_mslp)
+                ecmwf_tp_total = regrid_to_gfs(ecmwf_tp_total, gfs_mslp)
+                ecmwf_sf_total = regrid_to_gfs(ecmwf_sf_total, gfs_mslp)
 
-            gdps_mslp = regrid_to_gfs(open_gdps_mslp(gdps_mslp_path), gfs_mslp)
-            if forecast_hour == 0:
-                gdps_prate = xr.zeros_like(gfs_mslp)
-                gdps_snow_mask = xr.zeros_like(gfs_mslp)
+                if previous_ecmwf_tp is None:
+                    ecmwf_tp_increment = ecmwf_tp_total.copy(deep=True)
+                    ecmwf_sf_increment = ecmwf_sf_total.copy(deep=True)
+                else:
+                    ecmwf_tp_increment = xr.where(ecmwf_tp_total - previous_ecmwf_tp > 0, ecmwf_tp_total - previous_ecmwf_tp, 0)
+                    ecmwf_sf_increment = xr.where(ecmwf_sf_total - previous_ecmwf_sf > 0, ecmwf_sf_total - previous_ecmwf_sf, 0)
+
+                previous_ecmwf_tp = ecmwf_tp_total.copy(deep=True)
+                previous_ecmwf_sf = ecmwf_sf_total.copy(deep=True)
+                ecmwf_prate = ecmwf_tp_increment / 6.0
+                ecmwf_snow_mask = xr.where(ecmwf_sf_increment > 0.01, 1.0, 0.0)
             else:
+                ecmwf_mslp = None
+                ecmwf_prate = None
+                ecmwf_snow_mask = None
+
+            if gdps_available:
+                gdps_mslp = regrid_to_gfs(open_gdps_mslp(gdps_mslp_path), gfs_mslp)
                 gdps_prate = regrid_to_gfs(open_gdps_precip(gdps_precip_path), gfs_mslp) / 6.0
                 gdps_snow_mask = xr.where(regrid_to_gfs(open_gdps_snow(gdps_snow_path), gfs_mslp) > 0.01, 1.0, 0.0)
+            else:
+                gdps_mslp = None
+                gdps_prate = None
+                gdps_snow_mask = None
 
             if icon_indexer is None:
                 icon_indexer = build_icon_indexer(icon_lats, icon_lons, gfs_mslp)
 
-            icon_mslp = remap_icon_to_gfs(
-                open_icon_scalar_field(icon_pmsl_path, "prmsl", scale=0.01),
-                icon_indexer,
-                gfs_mslp,
-                "icon_mslp",
-            )
-            if forecast_hour == 0:
-                icon_tp_total = xr.zeros_like(gfs_mslp)
-                icon_snow_total = xr.zeros_like(gfs_mslp)
-            else:
+            if icon_available:
+                icon_mslp = remap_icon_to_gfs(
+                    open_icon_scalar_field(icon_pmsl_path, "prmsl", scale=0.01),
+                    icon_indexer,
+                    gfs_mslp,
+                    "icon_mslp",
+                )
                 icon_tp_total = remap_icon_to_gfs(
                     open_icon_scalar_field(icon_tp_path, "tp"),
                     icon_indexer,
@@ -744,76 +805,55 @@ def main():
                     "icon_snow_total",
                 )
 
-            if previous_ecmwf_tp is None:
-                ecmwf_tp_increment = xr.zeros_like(ecmwf_tp_total)
-                ecmwf_sf_increment = xr.zeros_like(ecmwf_sf_total)
+                if previous_icon_tp is None:
+                    icon_tp_increment = icon_tp_total.copy(deep=True)
+                    icon_snow_increment = icon_snow_total.copy(deep=True)
+                else:
+                    icon_tp_increment = xr.where(icon_tp_total - previous_icon_tp > 0, icon_tp_total - previous_icon_tp, 0)
+                    icon_snow_increment = xr.where(icon_snow_total - previous_icon_snow > 0, icon_snow_total - previous_icon_snow, 0)
+
+                previous_icon_tp = icon_tp_total.copy(deep=True)
+                previous_icon_snow = icon_snow_total.copy(deep=True)
+                icon_prate = icon_tp_increment / 6.0
+                icon_snow_mask = xr.where(icon_snow_increment > 0.01, 1.0, 0.0)
             else:
-                ecmwf_tp_increment = xr.where(ecmwf_tp_total - previous_ecmwf_tp > 0, ecmwf_tp_total - previous_ecmwf_tp, 0)
-                ecmwf_sf_increment = xr.where(ecmwf_sf_total - previous_ecmwf_sf > 0, ecmwf_sf_total - previous_ecmwf_sf, 0)
+                icon_mslp = None
+                icon_prate = None
+                icon_snow_mask = None
 
-            previous_ecmwf_tp = ecmwf_tp_total.copy(deep=True)
-            previous_ecmwf_sf = ecmwf_sf_total.copy(deep=True)
-
-            if previous_icon_tp is None:
-                icon_tp_increment = xr.zeros_like(icon_tp_total)
-                icon_snow_increment = xr.zeros_like(icon_snow_total)
-            else:
-                icon_tp_increment = xr.where(icon_tp_total - previous_icon_tp > 0, icon_tp_total - previous_icon_tp, 0)
-                icon_snow_increment = xr.where(icon_snow_total - previous_icon_snow > 0, icon_snow_total - previous_icon_snow, 0)
-
-            previous_icon_tp = icon_tp_total.copy(deep=True)
-            previous_icon_snow = icon_snow_total.copy(deep=True)
-
-            ecmwf_prate = ecmwf_tp_increment / 6.0
-            ecmwf_snow_mask = xr.where(ecmwf_sf_increment > 0.01, 1.0, 0.0)
             gfs_snow_mask = xr.where(gfs_csnow >= 0.5, 1.0, 0.0)
-            icon_prate = icon_tp_increment / 6.0
-            icon_snow_mask = xr.where(icon_snow_increment > 0.01, 1.0, 0.0)
-            total_weight = sum(model_weights.values())
+            available_runs = [("GFS", gfs_run)]
+            prate_fields = [(gfs_prate, model_weights["gfs"])]
+            mslp_fields = [(gfs_mslp, model_weights["gfs"])]
+            snow_mask_fields = [(gfs_snow_mask, model_weights["gfs"])]
 
-            avg_prate = xr.DataArray(
-                (
-                    gfs_prate.values * model_weights["gfs"]
-                    + ecmwf_prate.values * model_weights["ecmwf"]
-                    + icon_prate.values * model_weights["icon"]
-                    + gdps_prate.values * model_weights["gdps"]
-                ) / total_weight,
-                coords=gfs_prate.coords,
-                dims=gfs_prate.dims,
-                name="avg_prate",
-            )
-            avg_mslp = xr.DataArray(
-                (
-                    gfs_mslp.values * model_weights["gfs"]
-                    + ecmwf_mslp.values * model_weights["ecmwf"]
-                    + icon_mslp.values * model_weights["icon"]
-                    + gdps_mslp.values * model_weights["gdps"]
-                ) / total_weight,
-                coords=gfs_mslp.coords,
-                dims=gfs_mslp.dims,
-                name="avg_mslp",
-            )
-            avg_snow_mask = xr.DataArray(
-                (
-                    gfs_snow_mask.values * model_weights["gfs"]
-                    + ecmwf_snow_mask.values * model_weights["ecmwf"]
-                    + icon_snow_mask.values * model_weights["icon"]
-                    + gdps_snow_mask.values * model_weights["gdps"]
-                ) / total_weight,
-                coords=gfs_snow_mask.coords,
-                dims=gfs_snow_mask.dims,
-                name="avg_snow_mask",
-            )
+            if ecmwf_available:
+                available_runs.append(("ECMWF", ecmwf_run))
+                prate_fields.append((ecmwf_prate, model_weights["ecmwf"]))
+                mslp_fields.append((ecmwf_mslp, model_weights["ecmwf"]))
+                snow_mask_fields.append((ecmwf_snow_mask, model_weights["ecmwf"]))
+
+            if icon_available:
+                available_runs.append(("ICON", icon_run))
+                prate_fields.append((icon_prate, model_weights["icon"]))
+                mslp_fields.append((icon_mslp, model_weights["icon"]))
+                snow_mask_fields.append((icon_snow_mask, model_weights["icon"]))
+
+            if gdps_available:
+                available_runs.append(("GDPS", gdps_run))
+                prate_fields.append((gdps_prate, model_weights["gdps"]))
+                mslp_fields.append((gdps_mslp, model_weights["gdps"]))
+                snow_mask_fields.append((gdps_snow_mask, model_weights["gdps"]))
+
+            avg_prate = weighted_average_fields(prate_fields, "avg_prate")
+            avg_mslp = weighted_average_fields(mslp_fields, "avg_mslp")
+            avg_snow_mask = weighted_average_fields(snow_mask_fields, "avg_snow_mask")
 
             plot_average_fields(
                 avg_prate,
                 avg_mslp,
                 avg_snow_mask,
-                gfs_run,
-                icon_run,
-                ecmwf_run,
-                gdps_run,
-                model_weights,
+                available_runs,
                 forecast_hour,
                 step_str,
             )
