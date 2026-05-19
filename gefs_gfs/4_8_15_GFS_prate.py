@@ -712,23 +712,30 @@ for step in forecast_steps:
         cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
         cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
         cb1 = fig.colorbar(mesh, cax=cbar_ax_prate, orientation='horizontal')
-        cb1.set_label("Average Surface PRATE (GFS + GEFS4 + GEFS8 + GEFS15) mm/hr", fontsize=7)
+        cb1.set_label("Average PRATE", fontsize=7)
         cb1.ax.tick_params(labelsize=6)
         cb2 = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation='horizontal')
-        cb2.set_label("Snow PRATE intensity where CSNOW is present (mm/hr)", fontsize=7)
+        cb2.set_label("Average Snow PRATE Intensity", fontsize=7)
         cb2.ax.tick_params(labelsize=6)
 
-        # place the main title above the plot
+        # Match the multi-line title format used by the main prate plot.
         forecast_local_time, forecast_day = format_local_time(run_date, run_hour, forecast_hour)
-        accuracy_str = f" | Prior run agreement: {accuracy_pct:.1f}%" if accuracy_pct is not None else " | Prior run agreement: N/A"
-        fig.suptitle(
-            f"plot2 estimated precip/prate & mslp — Run: {run_date} {run_hour}Z | Forecast: {step_str} ({forecast_local_time} EST, {forecast_day}){accuracy_str}",
-            fontsize=9,
-            fontweight='bold',
-            y=0.80
+        valid_utc = datetime.strptime(f"{run_date} {run_hour}", "%Y%m%d %H") + timedelta(hours=forecast_hour)
+        agreement_text = (
+            f"Prior run agreement: {accuracy_pct:.1f}%"
+            if accuracy_pct is not None
+            else "Prior run agreement: N/A"
         )
-        # adjust axes so the map has room above/below the title
-        plt.subplots_adjust(top=0.84)
+        ax.set_title(
+            (
+                f"GFS + GEFS4 + GEFS8 + GEFS15 precip/prate & MSLP | FH{step_str} | "
+                f"Valid {valid_utc:%Y-%m-%d %HZ} ({forecast_local_time} ET, {forecast_day})\n"
+                f"Runs: GFS {run_hour}Z | GEFS04 {run_hour}Z | GEFS08 {run_hour}Z | GEFS15 {run_hour}Z\n"
+                f"{agreement_text}"
+            ),
+            fontsize=7,
+            pad=6,
+        )
 
         png_path = os.path.join(BASE_DIR_AVG, "png", f"4_8_15_prate_mslp_avg_{step_str}.png")
         plt.savefig(png_path, bbox_inches='tight', dpi=300)
