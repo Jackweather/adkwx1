@@ -43,7 +43,7 @@ TOTAL_PRECIP_LEVELS = [
 ]
 TOTAL_PRECIP_COLORS = [
     "#ffffff", "#e3f2fd", "#bbdefb", "#90caf9", "#64b5f6", "#42a5f5", "#2196f3", "#1e88e5",
-    "#1976d2", "#1565c0", "#0d47a1", "#43a047", "#388e3c", "#2e7d32", "#fbc02d", "#f9a825",
+    "#1976d2", "#1565c0", "#43a047", "#388e3c", "#2e7d32", "#1b5e20", "#fbc02d", "#f9a825",
     "#f57c00", "#ef6c00", "#e65100", "#e53935", "#b71c1c", "#c62828", "#ad1457", "#6a1b9a",
     "#7b1fa2", "#8e24aa", "#9c27b0", "#6d4c41", "#795548", "#a1887f", "#bcaaa4", "#212121", "#fff59d",
 ]
@@ -592,6 +592,7 @@ def plot_average_fields(avg_total_precip, avg_mslp, avg_snow_mask, available_run
     cbar_height = 0.018
     cbar_ax_precip = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
     precip_bar = fig.colorbar(precip_mesh, cax=cbar_ax_precip, orientation="horizontal")
+    precip_bar.set_ticks([0.1, 0.5, 1, 2, 3, 5, 10, 20])
     precip_bar.set_label("Total accumulated precip (in)", fontsize=7)
     precip_bar.ax.tick_params(labelsize=6)
 
