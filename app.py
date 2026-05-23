@@ -65,6 +65,7 @@ def run_scripts(scripts, max_workers):
 
 PNG_DIRS = {
     "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
+    "total_precip": BASE_DIR / "EURO_GFS_TOTAL_PRECIP_OUTPUT" / "png",
 }
 
 DEFAULT_PANEL_GROUPS = ["main_NWP"]
@@ -162,8 +163,9 @@ def run_task1():
 def run_task2():
     scripts = [
         ("/opt/render/project/src/main_models_run/prate_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
+        ("/opt/render/project/src/main_models_run/total_precip_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
     ]
-    threading.Thread(target=lambda: run_scripts(scripts, 1)).start()
+    threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
     return "Task started in background! Check logs folder for output.", 200
 
 if __name__ == '__main__':
