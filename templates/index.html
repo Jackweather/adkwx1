@@ -374,7 +374,8 @@
                 font-size: 10px;
             }
             .view-select,
-            .compare-toggle {
+            .compare-toggle,
+            .mode-toggle {
                 font-size: 10px;
                 padding: 6px 8px;
             }
@@ -403,7 +404,8 @@
             .panel-label,
             .view-control-label,
             .view-select,
-            .compare-toggle {
+            .compare-toggle,
+            .mode-toggle {
                 font-size: 9px;
             }
         }
@@ -425,6 +427,7 @@
                         {% endfor %}
                     </select>
                 </label>
+                <button type="button" class="compare-toggle mode-toggle" id="modeToggle">Show Total Precip</button>
                 <button type="button" class="compare-toggle" id="compareToggle">Compare to Main NWP</button>
             </div>
             <div class="slider-container">
@@ -459,12 +462,14 @@
         const slideDataElement = document.getElementById('slideData');
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
+        const modeToggle = document.getElementById('modeToggle');
         const compareToggle = document.getElementById('compareToggle');
         const COMPARE_GROUP = 'main_NWP';
+        const TOTAL_PRECIP_GROUP = 'total_precip';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
-        const DEFAULT_PRIMARY_GROUP = defaultPanelGroups.find((group) => group !== COMPARE_GROUP) || defaultPanelGroups[0] || allGroups[0] || '';
+        const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
         let lastSlideSignature = JSON.stringify(slideData);
@@ -517,12 +522,27 @@
             if (group === 'main_NWP') {
                 return 'Main NWP';
             }
+            if (group === TOTAL_PRECIP_GROUP) {
+                return 'Total Precip';
+            }
             return group.replaceAll('_', ' / ');
         }
 
         function syncToolbarControls() {
             if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
                 primaryGroupSelect.value = selectedPrimaryGroup;
+            }
+
+            const totalPrecipAvailable = allGroups.includes(TOTAL_PRECIP_GROUP);
+            const showingTotalPrecip = selectedPrimaryGroup === TOTAL_PRECIP_GROUP;
+
+            if (modeToggle) {
+                modeToggle.disabled = !totalPrecipAvailable;
+                modeToggle.classList.toggle('is-active', showingTotalPrecip);
+                modeToggle.textContent = !totalPrecipAvailable
+                    ? 'Total Precip Unavailable'
+                    : (showingTotalPrecip ? 'Show Main NWP' : 'Show Total Precip');
+                modeToggle.setAttribute('aria-pressed', String(showingTotalPrecip));
             }
 
             const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
@@ -688,6 +708,21 @@
         if (primaryGroupSelect) {
             primaryGroupSelect.addEventListener('input', (event) => {
                 selectedPrimaryGroup = event.target.value;
+                if (selectedPrimaryGroup === COMPARE_GROUP) {
+                    compareWithMainNwp = false;
+                }
+                saveSelectedPrimaryGroup();
+                saveCompareMode();
+                renderSlides();
+            });
+        }
+
+        if (modeToggle) {
+            modeToggle.addEventListener('click', () => {
+                if (!allGroups.includes(TOTAL_PRECIP_GROUP)) {
+                    return;
+                }
+                selectedPrimaryGroup = selectedPrimaryGroup === TOTAL_PRECIP_GROUP ? COMPARE_GROUP : TOTAL_PRECIP_GROUP;
                 if (selectedPrimaryGroup === COMPARE_GROUP) {
                     compareWithMainNwp = false;
                 }
