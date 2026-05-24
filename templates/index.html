@@ -423,7 +423,7 @@
                     <span class="view-control-label">Main View</span>
                     <select id="primaryGroupSelect" class="view-select" aria-label="Choose main image">
                         {% for group in groups %}
-                        <option value="{{ group }}"{% if group == default_panel_groups[0] %} selected{% endif %}>{{ group }}</option>
+                        <option value="{{ group }}"{% if group == default_panel_groups[0] %} selected{% endif %}>{{ group_labels.get(group, group) }}</option>
                         {% endfor %}
                     </select>
                 </label>
@@ -457,10 +457,12 @@
     </div>
     <script id="slideData" type="application/json">{{ slides | tojson }}</script>
     <script id="defaultPanelGroups" type="application/json">{{ default_panel_groups | tojson }}</script>
+    <script id="groupLabels" type="application/json">{{ group_labels | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
         const slideDataElement = document.getElementById('slideData');
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
+        const groupLabelsElement = document.getElementById('groupLabels');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
         const modeToggle = document.getElementById('modeToggle');
         const compareToggle = document.getElementById('compareToggle');
@@ -468,6 +470,7 @@
         const TOTAL_PRECIP_GROUP = 'total_precip';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
+        const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
         const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
         const sliderBar = document.getElementById('sliderBar');
@@ -498,11 +501,8 @@
         }
 
         function formatGroupLabel(group) {
-            if (group === 'main_NWP') {
-                return 'Main NWP';
-            }
-            if (group === TOTAL_PRECIP_GROUP) {
-                return 'Total Precip';
+            if (groupLabels[group]) {
+                return groupLabels[group];
             }
             return group.replaceAll('_', ' / ');
         }
