@@ -66,6 +66,13 @@ def run_scripts(scripts, max_workers):
 PNG_DIRS = {
     "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
     "total_precip": BASE_DIR / "EURO_GFS_TOTAL_PRECIP_OUTPUT" / "png",
+    "temp_2m": BASE_DIR / "EURO_GFS_T2M_OUTPUT" / "png",
+}
+
+GROUP_LABELS = {
+    "main_NWP": "Main NWP",
+    "total_precip": "Total Precip",
+    "temp_2m": "2m Temp",
 }
 
 DEFAULT_PANEL_GROUPS = ["main_NWP"]
@@ -114,6 +121,7 @@ def build_slide_payload():
         "groups": groups,
         "slides": slides,
         "default_panel_groups": DEFAULT_PANEL_GROUPS,
+        "group_labels": GROUP_LABELS,
     }
 
 @app.route('/')
@@ -124,6 +132,7 @@ def index():
         slides=payload["slides"],
         groups=payload["groups"],
         default_panel_groups=payload["default_panel_groups"],
+        group_labels=payload["group_labels"],
     )
 
 
@@ -164,6 +173,7 @@ def run_task2():
     scripts = [
         ("/opt/render/project/src/main_models_run/prate_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
         ("/opt/render/project/src/main_models_run/total_precip_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
+        ("/opt/render/project/src/main_models_run/temp_2m_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
     ]
     threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
     return "Task started in background! Check logs folder for output.", 200
