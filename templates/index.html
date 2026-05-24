@@ -476,37 +476,16 @@
         const REFRESH_INTERVAL_MS = 30000;
         const PRIMARY_GROUP_KEY = 'adkwx-primary-group-v1';
         const COMPARE_MODE_KEY = 'adkwx-compare-main-nwp-v1';
-        let selectedPrimaryGroup = loadSelectedPrimaryGroup();
-        let compareWithMainNwp = loadCompareMode();
+        let selectedPrimaryGroup = DEFAULT_PRIMARY_GROUP;
+        let compareWithMainNwp = false;
         let slideElements = [];
         let currentSlideIndex = 0;
-
-        function loadSelectedPrimaryGroup() {
-            try {
-                const savedGroup = window.localStorage.getItem(PRIMARY_GROUP_KEY);
-                if (savedGroup && allGroups.includes(savedGroup)) {
-                    return savedGroup;
-                }
-            } catch (error) {
-                console.warn('Failed to load saved primary group', error);
-            }
-            return DEFAULT_PRIMARY_GROUP;
-        }
 
         function saveSelectedPrimaryGroup() {
             try {
                 window.localStorage.setItem(PRIMARY_GROUP_KEY, selectedPrimaryGroup);
             } catch (error) {
                 console.warn('Failed to save primary group', error);
-            }
-        }
-
-        function loadCompareMode() {
-            try {
-                return window.localStorage.getItem(COMPARE_MODE_KEY) === 'true';
-            } catch (error) {
-                console.warn('Failed to load compare mode', error);
-                return false;
             }
         }
 
