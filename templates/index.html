@@ -427,23 +427,32 @@
                         {% endfor %}
                     </select>
                 </label>
+                <label class="view-control" for="regionSelect">
+                    <span class="view-control-label">Region</span>
+                    <select id="regionSelect" class="view-select" aria-label="Choose region">
+                        {% for region in regions %}
+                        <option value="{{ region }}"{% if region == default_region %} selected{% endif %}>{{ region_labels.get(region, region) }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
                 <button type="button" class="compare-toggle" id="compareToggle">Compare to Main NWP</button>
             </div>
             <div class="slider-container">
                 {% for slide in slides %}
                 <div class="slide{% if loop.first %} active{% endif %}" data-index="{{ slide.index }}">
                     {% set primary_group = default_panel_groups[0] %}
-                    {% set image = slide.images.get(primary_group) %}
+                    {% set region = default_region %}
+                    {% set image = slide.images.get(primary_group, {}).get(region) %}
                     <div class="panel" data-group="{{ primary_group }}">
                         <div class="panel-header">
-                            <div class="panel-label">{{ primary_group }}</div>
+                            <div class="panel-label">{{ group_labels.get(primary_group, primary_group) }} · {{ region_labels.get(region, region) }}</div>
                         </div>
                         <img
-                            {% if image %}src="{{ url_for('serve_png', group=primary_group, filename=image.filename, v=image.version) }}"{% endif %}
-                            alt="Forecast {{ primary_group }}"
+                            {% if image %}src="{{ url_for('serve_region_png', group=primary_group, region=region, filename=image.filename, v=image.version) }}"{% endif %}
+                            alt="Forecast {{ group_labels.get(primary_group, primary_group) }} {{ region_labels.get(region, region) }}"
                             class="panel-image{% if not image %} is-hidden{% endif %}"
                         >
-                        <div class="empty{% if image %} is-hidden{% endif %}">No image for {{ primary_group }}</div>
+                        <div class="empty{% if image %} is-hidden{% endif %}">No image for {{ group_labels.get(primary_group, primary_group) }} in {{ region_labels.get(region, region) }}</div>
                     </div>
                 </div>
                 {% endfor %}
@@ -456,18 +465,28 @@
     </div>
     <script id="slideData" type="application/json">{{ slides | tojson }}</script>
     <script id="defaultPanelGroups" type="application/json">{{ default_panel_groups | tojson }}</script>
+    <script id="regionData" type="application/json">{{ regions | tojson }}</script>
+    <script id="defaultRegion" type="application/json">{{ default_region | tojson }}</script>
     <script id="groupLabels" type="application/json">{{ group_labels | tojson }}</script>
+    <script id="regionLabels" type="application/json">{{ region_labels | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
         const slideDataElement = document.getElementById('slideData');
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
+        const regionDataElement = document.getElementById('regionData');
+        const defaultRegionElement = document.getElementById('defaultRegion');
         const groupLabelsElement = document.getElementById('groupLabels');
+        const regionLabelsElement = document.getElementById('regionLabels');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
+        const regionSelect = document.getElementById('regionSelect');
         const compareToggle = document.getElementById('compareToggle');
         const COMPARE_GROUP = 'main_NWP';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
+        let availableRegions = regionDataElement ? JSON.parse(regionDataElement.textContent) : [];
+        const DEFAULT_REGION = defaultRegionElement ? JSON.parse(defaultRegionElement.textContent) : 'conus';
         const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
+        let regionLabels = regionLabelsElement ? JSON.parse(regionLabelsElement.textContent) : {};
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
         const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
         const sliderBar = document.getElementById('sliderBar');
@@ -475,17 +494,48 @@
         let lastSlideSignature = JSON.stringify(slideData);
         const REFRESH_INTERVAL_MS = 30000;
         const PRIMARY_GROUP_KEY = 'adkwx-primary-group-v1';
+        const REGION_KEY = 'adkwx-region-v1';
         const COMPARE_MODE_KEY = 'adkwx-compare-main-nwp-v1';
         let selectedPrimaryGroup = DEFAULT_PRIMARY_GROUP;
+        let selectedRegion = DEFAULT_REGION;
         let compareWithMainNwp = false;
         let slideElements = [];
         let currentSlideIndex = 0;
+
+        function readStoredValue(key) {
+            try {
+                return window.localStorage.getItem(key);
+            } catch (error) {
+                console.warn('Failed to read saved setting', error);
+                return null;
+            }
+        }
+
+        const storedPrimaryGroup = readStoredValue(PRIMARY_GROUP_KEY);
+        if (storedPrimaryGroup && allGroups.includes(storedPrimaryGroup)) {
+            selectedPrimaryGroup = storedPrimaryGroup;
+        }
+
+        const storedRegion = readStoredValue(REGION_KEY);
+        if (storedRegion && availableRegions.includes(storedRegion)) {
+            selectedRegion = storedRegion;
+        }
+
+        compareWithMainNwp = readStoredValue(COMPARE_MODE_KEY) === 'true';
 
         function saveSelectedPrimaryGroup() {
             try {
                 window.localStorage.setItem(PRIMARY_GROUP_KEY, selectedPrimaryGroup);
             } catch (error) {
                 console.warn('Failed to save primary group', error);
+            }
+        }
+
+        function saveSelectedRegion() {
+            try {
+                window.localStorage.setItem(REGION_KEY, selectedRegion);
+            } catch (error) {
+                console.warn('Failed to save region', error);
             }
         }
 
@@ -504,9 +554,20 @@
             return group.replaceAll('_', ' / ');
         }
 
+        function formatRegionLabel(region) {
+            if (regionLabels[region]) {
+                return regionLabels[region];
+            }
+            return region.replaceAll('_', ' ');
+        }
+
         function syncToolbarControls() {
             if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
                 primaryGroupSelect.value = selectedPrimaryGroup;
+            }
+
+            if (regionSelect && regionSelect.value !== selectedRegion) {
+                regionSelect.value = selectedRegion;
             }
 
             const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
@@ -525,7 +586,7 @@
         }
 
         function createPanelElement(slide, group) {
-            const imageData = group ? slide.images[group] : null;
+            const imageData = group && slide.images[group] ? slide.images[group][selectedRegion] : null;
 
             const panel = document.createElement('div');
             panel.className = 'panel';
@@ -536,20 +597,20 @@
 
             const panelLabel = document.createElement('div');
             panelLabel.className = 'panel-label';
-            panelLabel.textContent = formatGroupLabel(group);
+            panelLabel.textContent = `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)}`;
 
             panelHeader.appendChild(panelLabel);
 
             const image = document.createElement('img');
             image.className = 'panel-image';
-            image.alt = `Forecast ${formatGroupLabel(group)}`;
+            image.alt = `Forecast ${formatGroupLabel(group)} ${formatRegionLabel(selectedRegion)}`;
 
             const empty = document.createElement('div');
             empty.className = 'empty';
-            empty.textContent = `No image for ${formatGroupLabel(group)}`;
+            empty.textContent = `No image for ${formatGroupLabel(group)} in ${formatRegionLabel(selectedRegion)}`;
 
             if (imageData) {
-                image.src = buildImageUrl(group, imageData);
+                image.src = buildImageUrl(group, selectedRegion, imageData);
                 empty.classList.add('is-hidden');
             } else {
                 image.classList.add('is-hidden');
@@ -604,9 +665,9 @@
             }
         }
 
-        function buildImageUrl(group, image) {
+        function buildImageUrl(group, region, image) {
             const filename = encodeURIComponent(image.filename);
-            return `/pngs/${encodeURIComponent(group)}/${filename}?v=${encodeURIComponent(image.version)}`;
+            return `/pngs/${encodeURIComponent(group)}/${encodeURIComponent(region)}/${filename}?v=${encodeURIComponent(image.version)}`;
         }
 
         function updateSlidePanels(index) {
@@ -651,9 +712,16 @@
 
                 const payload = await response.json();
                 const nextSlides = Array.isArray(payload.slides) ? payload.slides : [];
-                const nextSignature = JSON.stringify(nextSlides);
+                const nextRegions = Array.isArray(payload.regions) ? payload.regions : availableRegions;
+                const nextRegionLabels = payload.region_labels && typeof payload.region_labels === 'object' ? payload.region_labels : regionLabels;
+                const nextSignature = JSON.stringify({ slides: nextSlides, regions: nextRegions });
                 if (nextSignature !== lastSlideSignature) {
                     slideData = nextSlides;
+                    availableRegions = nextRegions;
+                    regionLabels = nextRegionLabels;
+                    if (!availableRegions.includes(selectedRegion)) {
+                        selectedRegion = availableRegions.includes(DEFAULT_REGION) ? DEFAULT_REGION : (availableRegions[0] || DEFAULT_REGION);
+                    }
                     lastSlideSignature = nextSignature;
                     renderSlides();
                 } else {
@@ -681,6 +749,14 @@
             });
         }
 
+        if (regionSelect) {
+            regionSelect.addEventListener('input', (event) => {
+                selectedRegion = event.target.value;
+                saveSelectedRegion();
+                renderSlides();
+            });
+        }
+
         if (compareToggle) {
             compareToggle.addEventListener('click', () => {
                 if (selectedPrimaryGroup === COMPARE_GROUP) {
@@ -694,6 +770,7 @@
 
         // initialize
         saveSelectedPrimaryGroup();
+        saveSelectedRegion();
         saveCompareMode();
         renderSlides();
         window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
