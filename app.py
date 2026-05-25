@@ -8,10 +8,12 @@ import getpass
 import re
 from pathlib import Path
 
+from main_models_run.region_config import ACTIVE_REGION_NAMES, DEFAULT_REGION, REGION_LABELS
+
 app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
-BASE_DIR = Path("/var/data")
+BASE_DIR = Path("/var/data") if Path("/var/data").exists() else Path(__file__).resolve().parent
 
 
 def run_scripts(scripts, max_workers):
@@ -78,50 +80,71 @@ GROUP_LABELS = {
 DEFAULT_PANEL_GROUPS = ["main_NWP"]
 
 
+def build_image_entry(file_path):
+    version = str(int(file_path.stat().st_mtime))
+    match = re.search(r'_(\d{3})\.png$', file_path.name)
+    key = match.group(1) if match else f"idx_{file_path.stem}"
+    return key, {
+        "filename": file_path.name,
+        "version": version,
+    }
+
+
 def build_slide_payload():
-    # build per-group filename map keyed by 3-digit forecast index (e.g. "006")
     group_files = {}
+    discovered_regions = []
+
     for group, path in PNG_DIRS.items():
         group_files[group] = {}
-        if os.path.isdir(path):
-            for f in sorted([x for x in os.listdir(path) if x.endswith('.png')]):
-                file_path = os.path.join(path, f)
-                version = str(int(os.path.getmtime(file_path)))
-                m = re.search(r'_(\d{3})\.png$', f)
-                if m:
-                    key = m.group(1)
-                    group_files[group][key] = {
-                        "filename": f,
-                        "version": version,
-                    }
-                else:
-                    idx = f"idx_{len(group_files[group])}"
-                    group_files[group][idx] = {
-                        "filename": f,
-                        "version": version,
-                    }
+        if not path.is_dir():
+            continue
+
+        for file_path in sorted(path.glob("*.png")):
+            key, image_entry = build_image_entry(file_path)
+            group_files[group].setdefault(DEFAULT_REGION, {})[key] = image_entry
+
+        for region_dir in sorted(child for child in path.iterdir() if child.is_dir()):
+            region_name = region_dir.name
+            if region_name not in discovered_regions:
+                discovered_regions.append(region_name)
+
+            for file_path in sorted(region_dir.glob("*.png")):
+                key, image_entry = build_image_entry(file_path)
+                group_files[group].setdefault(region_name, {})[key] = image_entry
 
     all_keys = set()
-    for gmap in group_files.values():
-        all_keys.update(gmap.keys())
+    for region_map in group_files.values():
+        for images_by_step in region_map.values():
+            all_keys.update(images_by_step.keys())
 
     def key_sort(k):
         return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
 
     ordered_keys = sorted(all_keys, key=key_sort)
     groups = list(PNG_DIRS.keys())
+    regions = list(ACTIVE_REGION_NAMES)
+    for region_name in discovered_regions:
+        if region_name not in regions:
+            regions.append(region_name)
+
     slides = []
     for k in ordered_keys:
         slides.append({
             "index": k,
-            "images": {group: group_files.get(group, {}).get(k) for group in groups}
+            "images": {
+                group: {region: group_files.get(group, {}).get(region, {}).get(k) for region in regions}
+                for group in groups
+            }
         })
 
     return {
         "groups": groups,
+        "regions": regions,
         "slides": slides,
         "default_panel_groups": DEFAULT_PANEL_GROUPS,
+        "default_region": DEFAULT_REGION,
         "group_labels": GROUP_LABELS,
+        "region_labels": {region: REGION_LABELS.get(region, region.replace('_', ' ').title()) for region in regions},
     }
 
 @app.route('/')
@@ -131,8 +154,11 @@ def index():
         'index.html',
         slides=payload["slides"],
         groups=payload["groups"],
+        regions=payload["regions"],
         default_panel_groups=payload["default_panel_groups"],
+        default_region=payload["default_region"],
         group_labels=payload["group_labels"],
+        region_labels=payload["region_labels"],
     )
 
 
@@ -145,16 +171,29 @@ def slide_data():
     response.headers['Expires'] = '0'
     return response
 
-@app.route('/pngs/<group>/<filename>')
-def serve_png(group, filename):
+@app.route('/pngs/<group>/<region>/<filename>')
+def serve_region_png(group, region, filename):
     dir_path = PNG_DIRS.get(group)
-    if not dir_path or not os.path.isdir(dir_path):
+    if not dir_path or not dir_path.is_dir():
         abort(404)
-    response = send_from_directory(dir_path, filename, max_age=0)
+
+    region_dir = dir_path / region
+    if region_dir.is_dir():
+        response = send_from_directory(region_dir, filename, max_age=0)
+    elif region == DEFAULT_REGION:
+        response = send_from_directory(dir_path, filename, max_age=0)
+    else:
+        abort(404)
+
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
     response.headers['Expires'] = '0'
     return response
+
+
+@app.route('/pngs/<group>/<filename>')
+def serve_png(group, filename):
+    return serve_region_png(group, DEFAULT_REGION, filename)
 
 @app.route("/run-task1")
 def run_task1():
