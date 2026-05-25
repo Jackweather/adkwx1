@@ -20,6 +20,7 @@ from scipy.ndimage import gaussian_filter, maximum_filter, minimum_filter
 from scipy.spatial import cKDTree
 import xarray as xr
 from ecmwf.opendata import Client
+from region_config import ACTIVE_REGION_NAMES, CONUS_EXTENT, REGION_LABELS, get_region_extent, prepare_region_png_dirs
 
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -34,7 +35,7 @@ LOCAL_TZ = ZoneInfo("America/New_York")
 GFS_FILTER_URL = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 ICON_BASE_URL = "https://opendata.dwd.de/weather/nwp/icon/grib"
 GDPS_BASE_URL = "https://dd.weather.gc.ca"
-PLOT_EXTENT = (-130, -65, 20, 54)
+PLOT_EXTENT = CONUS_EXTENT
 ICON_MARGIN_DEGREES = 3.0
 
 PRATE_LEVELS = [0.1, 0.25, 0.5, 0.75, 1.5, 2, 2.5, 3, 4, 6, 10, 16, 24]
@@ -78,10 +79,7 @@ def prepare_output_dirs():
     if GRIB_DIR.exists():
         shutil.rmtree(GRIB_DIR)
     GRIB_DIR.mkdir(parents=True, exist_ok=True)
-    PNG_DIR.mkdir(parents=True, exist_ok=True)
-
-    for existing_png in PNG_DIR.glob("*.png"):
-        existing_png.unlink()
+    prepare_region_png_dirs(PNG_DIR, ACTIVE_REGION_NAMES)
 
     if LOG_FILE.exists():
         LOG_FILE.unlink()
@@ -512,105 +510,107 @@ def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, fore
     valid_utc, local_time, local_day = format_valid_time(gfs_run, forecast_hour)
     lon2d, lat2d = np.meshgrid(avg_prate.longitude.values, avg_prate.latitude.values)
 
-    fig = plt.figure(figsize=(10, 7), dpi=300, facecolor="white")
-    fig.subplots_adjust(top=0.86, bottom=0.06)
-    ax = plt.axes(projection=ccrs.PlateCarree())
-    ax.set_extent(PLOT_EXTENT, crs=ccrs.PlateCarree())
-    ax.add_feature(cfeature.LAND, facecolor="lightgray")
-    ax.add_feature(cfeature.OCEAN, facecolor="white")
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5)
-    ax.add_feature(cfeature.STATES, linewidth=0.3)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor="blue")
-    ax.add_feature(cfeature.LAKES, facecolor="lightblue", edgecolor="blue", linewidth=0.3, zorder=0)
-
-    rain_mesh = ax.contourf(
-        lon2d,
-        lat2d,
-        avg_prate.values,
-        levels=PRATE_LEVELS,
-        cmap=PRATE_CMAP,
-        norm=PRATE_NORM,
-        extend="max",
-        transform=ccrs.PlateCarree(),
-        zorder=50,
-    )
-
-    mslp_contours = ax.contour(
-        lon2d,
-        lat2d,
-        avg_mslp.values,
-        levels=MSLP_LEVELS,
-        colors="black",
-        linewidths=0.5,
-        transform=ccrs.PlateCarree(),
-    )
-    ax.clabel(mslp_contours, fmt="%d", fontsize=6)
-
-    snow_prate = xr.DataArray(avg_prate.values).where(xr.DataArray(avg_snow_mask.values) >= 0.5)
-    snow_mesh = ax.contourf(
-        lon2d,
-        lat2d,
-        snow_prate.values,
-        levels=PRATE_LEVELS,
-        cmap=SNOW_CMAP,
-        norm=SNOW_NORM,
-        extend="max",
-        transform=ccrs.PlateCarree(),
-        alpha=0.85,
-        zorder=51,
-    )
-
-    ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
-    ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
-    ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
-    ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor="blue", zorder=200)
-
-    top_mslp_contours = ax.contour(
-        lon2d,
-        lat2d,
-        avg_mslp.values,
-        levels=MSLP_LEVELS,
-        colors="black",
-        linewidths=0.6,
-        transform=ccrs.PlateCarree(),
-        zorder=210,
-    )
-    ax.clabel(top_mslp_contours, fmt="%d", fontsize=6)
-    plot_lows_highs(ax, lon2d, lat2d, avg_mslp.values, extent=PLOT_EXTENT)
-
-    cbar_left = 0.12
-    cbar_bottom = 0.10
-    cbar_width = 0.38
-    cbar_height = 0.018
-    cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
-    cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
-    prate_bar = fig.colorbar(rain_mesh, cax=cbar_ax_prate, orientation="horizontal")
-    prate_bar.set_label("Avg PRATE mm/hr", fontsize=7)
-    prate_bar.ax.tick_params(labelsize=6)
-    snow_bar = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation="horizontal")
-    snow_bar.set_label("Snow-zone PRATE mm/hr", fontsize=7)
-    snow_bar.ax.tick_params(labelsize=6)
-
     model_text = " + ".join(name for name, _ in available_runs)
     run_text = " | ".join(f"{name} {run_time:%HZ}" for name, run_time in available_runs)
     weight_text = "Equal weights of available models"
 
-    ax.set_title(
-        (
-            f"{model_text} precip/prate & MSLP | FH{step_str} | "
-            f"Valid {valid_utc:%Y-%m-%d %HZ} ({local_time} ET, {local_day})\n"
-            f"Runs: {run_text}\n"
-            f"{weight_text}"
-        ),
-        fontsize=7,
-        pad=6,
-    )
+    for region_name in ACTIVE_REGION_NAMES:
+        region_extent = get_region_extent(region_name)
 
-    output_path = PNG_DIR / f"euro_gfs_prate_mslp_avg_{step_str}.png"
-    plt.savefig(output_path, bbox_inches="tight", dpi=300)
-    plt.close(fig)
-    print(f"Saved PNG: {output_path}")
+        fig = plt.figure(figsize=(10, 7), dpi=300, facecolor="white")
+        ax = fig.add_axes([0.06, 0.18, 0.88, 0.68], projection=ccrs.PlateCarree())
+        ax.set_extent(region_extent, crs=ccrs.PlateCarree())
+        ax.add_feature(cfeature.LAND, facecolor="lightgray")
+        ax.add_feature(cfeature.OCEAN, facecolor="white")
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5)
+        ax.add_feature(cfeature.STATES, linewidth=0.3)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor="blue")
+        ax.add_feature(cfeature.LAKES, facecolor="lightblue", edgecolor="blue", linewidth=0.3, zorder=0)
+
+        rain_mesh = ax.contourf(
+            lon2d,
+            lat2d,
+            avg_prate.values,
+            levels=PRATE_LEVELS,
+            cmap=PRATE_CMAP,
+            norm=PRATE_NORM,
+            extend="max",
+            transform=ccrs.PlateCarree(),
+            zorder=50,
+        )
+
+        mslp_contours = ax.contour(
+            lon2d,
+            lat2d,
+            avg_mslp.values,
+            levels=MSLP_LEVELS,
+            colors="black",
+            linewidths=0.5,
+            transform=ccrs.PlateCarree(),
+        )
+        ax.clabel(mslp_contours, fmt="%d", fontsize=6)
+
+        snow_prate = xr.DataArray(avg_prate.values).where(xr.DataArray(avg_snow_mask.values) >= 0.5)
+        snow_mesh = ax.contourf(
+            lon2d,
+            lat2d,
+            snow_prate.values,
+            levels=PRATE_LEVELS,
+            cmap=SNOW_CMAP,
+            norm=SNOW_NORM,
+            extend="max",
+            transform=ccrs.PlateCarree(),
+            alpha=0.85,
+            zorder=51,
+        )
+
+        ax.add_feature(cfeature.COASTLINE, linewidth=0.7, zorder=200)
+        ax.add_feature(cfeature.BORDERS, linewidth=0.5, zorder=200)
+        ax.add_feature(cfeature.STATES, linewidth=0.3, zorder=200)
+        ax.add_feature(cfeature.RIVERS, linewidth=0.4, edgecolor="blue", zorder=200)
+
+        top_mslp_contours = ax.contour(
+            lon2d,
+            lat2d,
+            avg_mslp.values,
+            levels=MSLP_LEVELS,
+            colors="black",
+            linewidths=0.6,
+            transform=ccrs.PlateCarree(),
+            zorder=210,
+        )
+        ax.clabel(top_mslp_contours, fmt="%d", fontsize=6)
+        plot_lows_highs(ax, lon2d, lat2d, avg_mslp.values, extent=region_extent)
+
+        cbar_left = 0.12
+        cbar_bottom = 0.08
+        cbar_width = 0.38
+        cbar_height = 0.018
+        cbar_ax_prate = fig.add_axes([cbar_left, cbar_bottom, cbar_width, cbar_height])
+        cbar_ax_snow = fig.add_axes([cbar_left + cbar_width + 0.02, cbar_bottom, cbar_width, cbar_height])
+        prate_bar = fig.colorbar(rain_mesh, cax=cbar_ax_prate, orientation="horizontal")
+        prate_bar.set_label("Avg PRATE mm/hr", fontsize=7)
+        prate_bar.ax.tick_params(labelsize=6)
+        snow_bar = fig.colorbar(snow_mesh, cax=cbar_ax_snow, orientation="horizontal")
+        snow_bar.set_label("Snow-zone PRATE mm/hr", fontsize=7)
+        snow_bar.ax.tick_params(labelsize=6)
+
+        ax.set_title(
+            (
+                f"{model_text} precip/prate & MSLP | {REGION_LABELS[region_name]} | FH{step_str} | "
+                f"Valid {valid_utc:%Y-%m-%d %HZ} ({local_time} ET, {local_day})\n"
+                f"Runs: {run_text}\n"
+                f"{weight_text}"
+            ),
+            fontsize=7,
+            pad=6,
+        )
+
+        output_path = PNG_DIR / region_name / f"euro_gfs_prate_mslp_avg_{step_str}.png"
+        plt.savefig(output_path, bbox_inches="tight", dpi=300)
+        plt.close(fig)
+        print(f"Saved PNG: {output_path}")
 
 
 def main():
