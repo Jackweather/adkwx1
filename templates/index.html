@@ -427,7 +427,6 @@
                         {% endfor %}
                     </select>
                 </label>
-                <button type="button" class="compare-toggle mode-toggle" id="modeToggle">Show Total Precip</button>
                 <button type="button" class="compare-toggle" id="compareToggle">Compare to Main NWP</button>
             </div>
             <div class="slider-container">
@@ -464,10 +463,8 @@
         const defaultPanelGroupsElement = document.getElementById('defaultPanelGroups');
         const groupLabelsElement = document.getElementById('groupLabels');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
-        const modeToggle = document.getElementById('modeToggle');
         const compareToggle = document.getElementById('compareToggle');
         const COMPARE_GROUP = 'main_NWP';
-        const TOTAL_PRECIP_GROUP = 'total_precip';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
         const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
@@ -510,18 +507,6 @@
         function syncToolbarControls() {
             if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
                 primaryGroupSelect.value = selectedPrimaryGroup;
-            }
-
-            const totalPrecipAvailable = allGroups.includes(TOTAL_PRECIP_GROUP);
-            const showingTotalPrecip = selectedPrimaryGroup === TOTAL_PRECIP_GROUP;
-
-            if (modeToggle) {
-                modeToggle.disabled = !totalPrecipAvailable;
-                modeToggle.classList.toggle('is-active', showingTotalPrecip);
-                modeToggle.textContent = !totalPrecipAvailable
-                    ? 'Total Precip Unavailable'
-                    : (showingTotalPrecip ? 'Show Main NWP' : 'Show Total Precip');
-                modeToggle.setAttribute('aria-pressed', String(showingTotalPrecip));
             }
 
             const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
@@ -687,21 +672,6 @@
         if (primaryGroupSelect) {
             primaryGroupSelect.addEventListener('input', (event) => {
                 selectedPrimaryGroup = event.target.value;
-                if (selectedPrimaryGroup === COMPARE_GROUP) {
-                    compareWithMainNwp = false;
-                }
-                saveSelectedPrimaryGroup();
-                saveCompareMode();
-                renderSlides();
-            });
-        }
-
-        if (modeToggle) {
-            modeToggle.addEventListener('click', () => {
-                if (!allGroups.includes(TOTAL_PRECIP_GROUP)) {
-                    return;
-                }
-                selectedPrimaryGroup = selectedPrimaryGroup === TOTAL_PRECIP_GROUP ? COMPARE_GROUP : TOTAL_PRECIP_GROUP;
                 if (selectedPrimaryGroup === COMPARE_GROUP) {
                     compareWithMainNwp = false;
                 }
