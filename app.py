@@ -81,7 +81,8 @@ DEFAULT_PANEL_GROUPS = ["main_NWP"]
 
 
 def build_image_entry(file_path):
-    version = str(int(file_path.stat().st_mtime))
+    stat = file_path.stat()
+    version = f"{stat.st_mtime_ns}-{stat.st_size}"
     match = re.search(r'_(\d{3})\.png$', file_path.name)
     key = match.group(1) if match else f"idx_{file_path.stem}"
     return key, {
