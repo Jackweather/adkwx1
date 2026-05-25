@@ -91,6 +91,10 @@ def log_error(step_str, context, error):
         handle.write(f"[{timestamp}] FH{step_str} | {context} | {error}\n")
 
 
+def log_optional_model_failure(step_str, model_name, error):
+    log_error(step_str, f"{model_name} unavailable for this hour; continuing with remaining models", error)
+
+
 def find_latest_gfs_run():
     now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     candidate = now_utc.replace(hour=(now_utc.hour // 6) * 6)
@@ -662,9 +666,9 @@ def main():
 
     for forecast_hour in forecast_steps:
         step_str = f"{forecast_hour:03d}"
-        ecmwf_available = forecast_hour <= run_config["ecmwf_max_hour"]
-        icon_available = forecast_hour <= run_config["icon_max_hour"]
-        gdps_available = forecast_hour <= run_config["gdps_max_hour"]
+        ecmwf_enabled = forecast_hour <= run_config["ecmwf_max_hour"]
+        icon_enabled = forecast_hour <= run_config["icon_max_hour"]
+        gdps_enabled = forecast_hour <= run_config["gdps_max_hour"]
 
         gfs_prate_path = GRIB_DIR / f"gfs_prate_f{step_str}.grib2"
         gfs_mslp_path = GRIB_DIR / f"gfs_mslp_f{step_str}.grib2"
@@ -689,32 +693,35 @@ def main():
                 gfs_csnow_path,
                 f"GFS CSNOW FH{step_str}",
             )
+            download_file(
+                build_gfs_url(gfs_run_date, gfs_run_hour, step_str, "var_PRATE=on&lev_surface=on"),
+                gfs_prate_path,
+                f"GFS PRATE FH{step_str}",
+            )
 
+            ecmwf_available = ecmwf_enabled
             if ecmwf_available:
-                ecmwf_client.retrieve(
-                    date=int(ecmwf_run.strftime("%Y%m%d")),
-                    time=ecmwf_run.hour,
-                    type="fc",
-                    step=forecast_hour,
-                    param=["msl", "tp", "sf"],
-                    target=str(ecmwf_path),
-                )
+                try:
+                    ecmwf_client.retrieve(
+                        date=int(ecmwf_run.strftime("%Y%m%d")),
+                        time=ecmwf_run.hour,
+                        type="fc",
+                        step=forecast_hour,
+                        param=["msl", "tp", "sf"],
+                        target=str(ecmwf_path),
+                    )
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ECMWF", exc)
+                    ecmwf_available = False
 
+            icon_available = icon_enabled
             if icon_available:
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
-                    icon_pmsl_path,
-                    f"ICON PMSL FH{step_str}",
-                )
-            if gdps_available:
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
-                    gdps_mslp_path,
-                    f"GDPS MSLP FH{step_str}",
-                )
-
-            if forecast_hour > 0:
-                if icon_available:
+                try:
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
+                        icon_pmsl_path,
+                        f"ICON PMSL FH{step_str}",
+                    )
                     download_bz2_file(
                         build_icon_field_url(icon_run_date, icon_run_hour, "tot_prec", step_str, "TOT_PREC"),
                         icon_tp_path,
@@ -730,7 +737,18 @@ def main():
                         icon_snow_con_path,
                         f"ICON SNOW_CON FH{step_str}",
                     )
-                if gdps_available:
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ICON", exc)
+                    icon_available = False
+
+            gdps_available = gdps_enabled
+            if gdps_available:
+                try:
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
+                        gdps_mslp_path,
+                        f"GDPS MSLP FH{step_str}",
+                    )
                     download_file(
                         build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Precip-Accum6h_Sfc"),
                         gdps_precip_path,
@@ -741,42 +759,54 @@ def main():
                         gdps_snow_path,
                         f"GDPS Snow FH{step_str}",
                     )
-                download_file(
-                    build_gfs_url(gfs_run_date, gfs_run_hour, step_str, "var_PRATE=on&lev_surface=on"),
-                    gfs_prate_path,
-                    f"GFS PRATE FH{step_str}",
-                )
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "GDPS", exc)
+                    gdps_available = False
 
             gfs_mslp = open_gfs_mslp(gfs_mslp_path)
             gfs_csnow = open_gfs_csnow(gfs_csnow_path)
             gfs_prate = open_gfs_prate(gfs_prate_path)
 
             if ecmwf_available:
-                ecmwf_mslp, ecmwf_tp_total, ecmwf_sf_total = open_ecmwf_fields(ecmwf_path)
-                ecmwf_mslp = regrid_to_gfs(ecmwf_mslp, gfs_mslp)
-                ecmwf_tp_total = regrid_to_gfs(ecmwf_tp_total, gfs_mslp)
-                ecmwf_sf_total = regrid_to_gfs(ecmwf_sf_total, gfs_mslp)
+                try:
+                    ecmwf_mslp, ecmwf_tp_total, ecmwf_sf_total = open_ecmwf_fields(ecmwf_path)
+                    ecmwf_mslp = regrid_to_gfs(ecmwf_mslp, gfs_mslp)
+                    ecmwf_tp_total = regrid_to_gfs(ecmwf_tp_total, gfs_mslp)
+                    ecmwf_sf_total = regrid_to_gfs(ecmwf_sf_total, gfs_mslp)
 
-                if previous_ecmwf_tp is None:
-                    ecmwf_tp_increment = ecmwf_tp_total.copy(deep=True)
-                    ecmwf_sf_increment = ecmwf_sf_total.copy(deep=True)
-                else:
-                    ecmwf_tp_increment = xr.where(ecmwf_tp_total - previous_ecmwf_tp > 0, ecmwf_tp_total - previous_ecmwf_tp, 0)
-                    ecmwf_sf_increment = xr.where(ecmwf_sf_total - previous_ecmwf_sf > 0, ecmwf_sf_total - previous_ecmwf_sf, 0)
+                    if previous_ecmwf_tp is None:
+                        ecmwf_tp_increment = ecmwf_tp_total.copy(deep=True)
+                        ecmwf_sf_increment = ecmwf_sf_total.copy(deep=True)
+                    else:
+                        ecmwf_tp_increment = xr.where(ecmwf_tp_total - previous_ecmwf_tp > 0, ecmwf_tp_total - previous_ecmwf_tp, 0)
+                        ecmwf_sf_increment = xr.where(ecmwf_sf_total - previous_ecmwf_sf > 0, ecmwf_sf_total - previous_ecmwf_sf, 0)
 
-                previous_ecmwf_tp = ecmwf_tp_total.copy(deep=True)
-                previous_ecmwf_sf = ecmwf_sf_total.copy(deep=True)
-                ecmwf_prate = ecmwf_tp_increment / 6.0
-                ecmwf_snow_mask = xr.where(ecmwf_sf_increment > 0.01, 1.0, 0.0)
+                    previous_ecmwf_tp = ecmwf_tp_total.copy(deep=True)
+                    previous_ecmwf_sf = ecmwf_sf_total.copy(deep=True)
+                    ecmwf_prate = ecmwf_tp_increment / 6.0
+                    ecmwf_snow_mask = xr.where(ecmwf_sf_increment > 0.01, 1.0, 0.0)
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ECMWF", exc)
+                    ecmwf_available = False
+                    ecmwf_mslp = None
+                    ecmwf_prate = None
+                    ecmwf_snow_mask = None
             else:
                 ecmwf_mslp = None
                 ecmwf_prate = None
                 ecmwf_snow_mask = None
 
             if gdps_available:
-                gdps_mslp = regrid_to_gfs(open_gdps_mslp(gdps_mslp_path), gfs_mslp)
-                gdps_prate = regrid_to_gfs(open_gdps_precip(gdps_precip_path), gfs_mslp) / 6.0
-                gdps_snow_mask = xr.where(regrid_to_gfs(open_gdps_snow(gdps_snow_path), gfs_mslp) > 0.01, 1.0, 0.0)
+                try:
+                    gdps_mslp = regrid_to_gfs(open_gdps_mslp(gdps_mslp_path), gfs_mslp)
+                    gdps_prate = regrid_to_gfs(open_gdps_precip(gdps_precip_path), gfs_mslp) / 6.0
+                    gdps_snow_mask = xr.where(regrid_to_gfs(open_gdps_snow(gdps_snow_path), gfs_mslp) > 0.01, 1.0, 0.0)
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "GDPS", exc)
+                    gdps_available = False
+                    gdps_mslp = None
+                    gdps_prate = None
+                    gdps_snow_mask = None
             else:
                 gdps_mslp = None
                 gdps_prate = None
@@ -786,36 +816,43 @@ def main():
                 icon_indexer = build_icon_indexer(icon_lats, icon_lons, gfs_mslp)
 
             if icon_available:
-                icon_mslp = remap_icon_to_gfs(
-                    open_icon_scalar_field(icon_pmsl_path, "prmsl", scale=0.01),
-                    icon_indexer,
-                    gfs_mslp,
-                    "icon_mslp",
-                )
-                icon_tp_total = remap_icon_to_gfs(
-                    open_icon_scalar_field(icon_tp_path, "tp"),
-                    icon_indexer,
-                    gfs_mslp,
-                    "icon_tp_total",
-                )
-                icon_snow_total = remap_icon_to_gfs(
-                    open_icon_scalar_field(icon_snow_gsp_path, ["lssfr", "lsfwe"]) + open_icon_scalar_field(icon_snow_con_path, "csfr"),
-                    icon_indexer,
-                    gfs_mslp,
-                    "icon_snow_total",
-                )
+                try:
+                    icon_mslp = remap_icon_to_gfs(
+                        open_icon_scalar_field(icon_pmsl_path, "prmsl", scale=0.01),
+                        icon_indexer,
+                        gfs_mslp,
+                        "icon_mslp",
+                    )
+                    icon_tp_total = remap_icon_to_gfs(
+                        open_icon_scalar_field(icon_tp_path, "tp"),
+                        icon_indexer,
+                        gfs_mslp,
+                        "icon_tp_total",
+                    )
+                    icon_snow_total = remap_icon_to_gfs(
+                        open_icon_scalar_field(icon_snow_gsp_path, ["lssfr", "lsfwe"]) + open_icon_scalar_field(icon_snow_con_path, "csfr"),
+                        icon_indexer,
+                        gfs_mslp,
+                        "icon_snow_total",
+                    )
 
-                if previous_icon_tp is None:
-                    icon_tp_increment = icon_tp_total.copy(deep=True)
-                    icon_snow_increment = icon_snow_total.copy(deep=True)
-                else:
-                    icon_tp_increment = xr.where(icon_tp_total - previous_icon_tp > 0, icon_tp_total - previous_icon_tp, 0)
-                    icon_snow_increment = xr.where(icon_snow_total - previous_icon_snow > 0, icon_snow_total - previous_icon_snow, 0)
+                    if previous_icon_tp is None:
+                        icon_tp_increment = icon_tp_total.copy(deep=True)
+                        icon_snow_increment = icon_snow_total.copy(deep=True)
+                    else:
+                        icon_tp_increment = xr.where(icon_tp_total - previous_icon_tp > 0, icon_tp_total - previous_icon_tp, 0)
+                        icon_snow_increment = xr.where(icon_snow_total - previous_icon_snow > 0, icon_snow_total - previous_icon_snow, 0)
 
-                previous_icon_tp = icon_tp_total.copy(deep=True)
-                previous_icon_snow = icon_snow_total.copy(deep=True)
-                icon_prate = icon_tp_increment / 6.0
-                icon_snow_mask = xr.where(icon_snow_increment > 0.01, 1.0, 0.0)
+                    previous_icon_tp = icon_tp_total.copy(deep=True)
+                    previous_icon_snow = icon_snow_total.copy(deep=True)
+                    icon_prate = icon_tp_increment / 6.0
+                    icon_snow_mask = xr.where(icon_snow_increment > 0.01, 1.0, 0.0)
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ICON", exc)
+                    icon_available = False
+                    icon_mslp = None
+                    icon_prate = None
+                    icon_snow_mask = None
             else:
                 icon_mslp = None
                 icon_prate = None
