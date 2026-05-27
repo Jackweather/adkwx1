@@ -40,14 +40,58 @@
             background: linear-gradient(135deg, var(--header-start), var(--header-end));
             color: white;
             padding: 14px 24px;
-            text-align: center;
+            min-height: var(--header-height);
+            box-sizing: border-box;
+            box-shadow: 0 10px 24px rgba(15, 59, 82, 0.18);
+        }
+        .header-bar {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 16px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        .brand-lockup {
+            display: flex;
+            flex-direction: column;
+            gap: 2px;
+        }
+        .brand-title {
             font-size: 28px;
             font-weight: 700;
             letter-spacing: 0.06em;
             text-transform: uppercase;
-            min-height: var(--header-height);
-            box-sizing: border-box;
-            box-shadow: 0 10px 24px rgba(15, 59, 82, 0.18);
+        }
+        .brand-subtitle {
+            font-size: 11px;
+            font-weight: 700;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            opacity: 0.82;
+        }
+        .page-nav {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+        .page-nav-link {
+            color: white;
+            text-decoration: none;
+            padding: 8px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255, 255, 255, 0.22);
+            background: rgba(255, 255, 255, 0.08);
+            font-size: 12px;
+            font-weight: 700;
+            letter-spacing: 0.08em;
+            text-transform: uppercase;
+        }
+        .page-nav-link.is-active {
+            background: rgba(255, 255, 255, 0.2);
+            border-color: rgba(255, 255, 255, 0.45);
         }
         .container {
             display: flex;
@@ -264,8 +308,20 @@
             }
             header {
                 padding: 16px;
+            }
+            .header-bar {
+                flex-direction: column;
+                align-items: stretch;
+            }
+            .brand-lockup {
+                text-align: center;
+            }
+            .brand-title {
                 font-size: 22px;
                 letter-spacing: 0.05em;
+            }
+            .page-nav {
+                justify-content: center;
             }
             .container {
                 overflow: hidden;
@@ -336,7 +392,12 @@
                 padding-top: calc(12px + env(safe-area-inset-top));
                 padding-left: max(14px, env(safe-area-inset-left));
                 padding-right: max(14px, env(safe-area-inset-right));
+            }
+            .brand-title {
                 font-size: 20px;
+            }
+            .brand-subtitle {
+                font-size: 10px;
             }
             .container {
                 min-height: calc(100svh - var(--header-height));
@@ -412,7 +473,19 @@
     </style>
 </head>
 <body>
-    <header>ADKwx</header>
+    <header>
+        <div class="header-bar">
+            <div class="brand-lockup">
+                <div class="brand-title">ADKwx</div>
+                <div class="brand-subtitle">{{ page_title }}</div>
+            </div>
+            <nav class="page-nav" aria-label="Viewer navigation">
+                {% for viewer in viewer_links %}
+                <a class="page-nav-link{% if viewer.key == current_viewer %} is-active{% endif %}" href="{{ viewer.url }}">{{ viewer.title }}</a>
+                {% endfor %}
+            </nav>
+        </div>
+    </header>
     <div class="container">
         <div class="left-side">
             <!-- empty left area -->
@@ -427,7 +500,7 @@
                         {% endfor %}
                     </select>
                 </label>
-                <label class="view-control" for="regionSelect">
+                <label class="view-control" for="regionSelect"{% if regions|length <= 1 %} hidden{% endif %}>
                     <span class="view-control-label">Region</span>
                     <select id="regionSelect" class="view-select" aria-label="Choose region">
                         {% for region in regions %}
@@ -469,6 +542,8 @@
     <script id="defaultRegion" type="application/json">{{ default_region | tojson }}</script>
     <script id="groupLabels" type="application/json">{{ group_labels | tojson }}</script>
     <script id="regionLabels" type="application/json">{{ region_labels | tojson }}</script>
+    <script id="compareGroup" type="application/json">{{ compare_group | tojson }}</script>
+    <script id="slideDataUrl" type="application/json">{{ slide_data_url | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
         const slideDataElement = document.getElementById('slideData');
@@ -477,18 +552,21 @@
         const defaultRegionElement = document.getElementById('defaultRegion');
         const groupLabelsElement = document.getElementById('groupLabels');
         const regionLabelsElement = document.getElementById('regionLabels');
+        const compareGroupElement = document.getElementById('compareGroup');
+        const slideDataUrlElement = document.getElementById('slideDataUrl');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
         const regionSelect = document.getElementById('regionSelect');
         const compareToggle = document.getElementById('compareToggle');
-        const COMPARE_GROUP = 'main_NWP';
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
         let availableRegions = regionDataElement ? JSON.parse(regionDataElement.textContent) : [];
         const DEFAULT_REGION = defaultRegionElement ? JSON.parse(defaultRegionElement.textContent) : 'conus';
         const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
         let regionLabels = regionLabelsElement ? JSON.parse(regionLabelsElement.textContent) : {};
+        const slideDataUrl = slideDataUrlElement ? JSON.parse(slideDataUrlElement.textContent) : '/slide-data';
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
         const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
+        const COMPARE_GROUP = compareGroupElement ? JSON.parse(compareGroupElement.textContent) : DEFAULT_PRIMARY_GROUP;
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
         let lastSlideSignature = JSON.stringify(slideData);
@@ -578,9 +656,10 @@
             if (compareToggle) {
                 compareToggle.disabled = compareDisabled;
                 compareToggle.classList.toggle('is-active', compareWithMainNwp && !compareDisabled);
+                const compareLabel = formatGroupLabel(COMPARE_GROUP);
                 compareToggle.textContent = compareDisabled
-                    ? 'Compare unavailable for Main NWP'
-                    : (compareWithMainNwp ? 'Hide Main NWP Compare' : 'Compare to Main NWP');
+                    ? `Compare unavailable for ${compareLabel}`
+                    : (compareWithMainNwp ? `Hide ${compareLabel} Compare` : `Compare to ${compareLabel}`);
                 compareToggle.setAttribute('aria-pressed', String(compareWithMainNwp && !compareDisabled));
             }
         }
@@ -700,7 +779,7 @@
 
         async function refreshSlideData() {
             try {
-                const response = await fetch('/slide-data', {
+                const response = await fetch(slideDataUrl, {
                     cache: 'no-store',
                     headers: {
                         'Cache-Control': 'no-cache'
