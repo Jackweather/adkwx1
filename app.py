@@ -1,4 +1,4 @@
-from flask import Flask, render_template, send_from_directory, abort, jsonify
+from flask import Flask, render_template, send_from_directory, abort, jsonify, url_for
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 import os
 import subprocess
@@ -14,6 +14,20 @@ app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 BASE_DIR = Path("/var/data") if Path("/var/data").exists() else Path(__file__).resolve().parent
+
+
+def resolve_png_dir(path_spec):
+    if isinstance(path_spec, Path):
+        return path_spec
+
+    for candidate in path_spec:
+        if candidate.is_dir():
+            return candidate
+
+    for candidate in path_spec:
+        return candidate
+
+    return None
 
 
 def run_scripts(scripts, max_workers):
@@ -65,19 +79,66 @@ def run_scripts(scripts, max_workers):
 
     print("All queued scripts finished. Background task ending.")
 
-PNG_DIRS = {
+MAIN_PNG_DIRS = {
     "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
     "total_precip": BASE_DIR / "EURO_GFS_TOTAL_PRECIP_OUTPUT" / "png",
     "temp_2m": BASE_DIR / "EURO_GFS_T2M_OUTPUT" / "png",
 }
 
-GROUP_LABELS = {
+MAIN_GROUP_LABELS = {
     "main_NWP": "Main NWP",
     "total_precip": "Total Precip",
     "temp_2m": "2m Temp",
 }
 
-DEFAULT_PANEL_GROUPS = ["main_NWP"]
+MAIN_DEFAULT_PANEL_GROUPS = ["main_NWP"]
+
+GEFS_PNG_DIRS = {
+    "3_12_18": (
+        BASE_DIR / "3_12_18_GFS_OUTPUT" / "png",
+        BASE_DIR / "gefs_gfs" / "3_12_18_GFS_OUTPUT" / "png",
+    ),
+    "4_8_15": (
+        BASE_DIR / "4_8_15_GFS_OUTPUT" / "png",
+        BASE_DIR / "gefs_gfs" / "4_8_15_GFS_OUTPUT" / "png",
+    ),
+    "5_6_10": (
+        BASE_DIR / "5_6_10_GFS_OUTPUT" / "png",
+        BASE_DIR / "gefs_gfs" / "5_6_10_GFS_OUTPUT" / "png",
+    ),
+    "7_11": (
+        BASE_DIR / "7_11_GFS_OUTPUT" / "png",
+        BASE_DIR / "gefs_gfs" / "7_11_GFS_OUTPUT" / "png",
+    ),
+}
+
+GEFS_GROUP_LABELS = {
+    "3_12_18": "3 / 12 / 18",
+    "4_8_15": "4 / 8 / 15",
+    "5_6_10": "5 / 6 / 10",
+    "7_11": "7 / 11",
+}
+
+GEFS_DEFAULT_PANEL_GROUPS = ["3_12_18"]
+
+VIEWER_CONFIGS = {
+    "main": {
+        "title": "Main Blend",
+        "endpoint": "index",
+        "png_dirs": MAIN_PNG_DIRS,
+        "group_labels": MAIN_GROUP_LABELS,
+        "default_panel_groups": MAIN_DEFAULT_PANEL_GROUPS,
+        "base_regions": ACTIVE_REGION_NAMES,
+    },
+    "gefs": {
+        "title": "GEFS Viewer",
+        "endpoint": "gefs_view",
+        "png_dirs": GEFS_PNG_DIRS,
+        "group_labels": GEFS_GROUP_LABELS,
+        "default_panel_groups": GEFS_DEFAULT_PANEL_GROUPS,
+        "base_regions": [DEFAULT_REGION],
+    },
+}
 
 
 def build_image_entry(file_path):
@@ -91,12 +152,15 @@ def build_image_entry(file_path):
     }
 
 
-def build_slide_payload():
+def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regions=None):
     group_files = {}
     discovered_regions = []
 
-    for group, path in PNG_DIRS.items():
+    for group, path_spec in png_dirs.items():
         group_files[group] = {}
+        path = resolve_png_dir(path_spec)
+        if path is None:
+            continue
         if not path.is_dir():
             continue
 
@@ -122,8 +186,10 @@ def build_slide_payload():
         return (0, int(k)) if re.fullmatch(r'\d{3}', k) else (1, k)
 
     ordered_keys = sorted(all_keys, key=key_sort)
-    groups = list(PNG_DIRS.keys())
-    regions = list(ACTIVE_REGION_NAMES)
+    groups = list(png_dirs.keys())
+    regions = list(base_regions or [])
+    if DEFAULT_REGION not in regions:
+        regions.insert(0, DEFAULT_REGION)
     for region_name in discovered_regions:
         if region_name not in regions:
             regions.append(region_name)
@@ -142,15 +208,30 @@ def build_slide_payload():
         "groups": groups,
         "regions": regions,
         "slides": slides,
-        "default_panel_groups": DEFAULT_PANEL_GROUPS,
+        "default_panel_groups": default_panel_groups,
         "default_region": DEFAULT_REGION,
-        "group_labels": GROUP_LABELS,
+        "group_labels": group_labels,
         "region_labels": {region: REGION_LABELS.get(region, region.replace('_', ' ').title()) for region in regions},
+        "compare_group": default_panel_groups[0] if default_panel_groups else (groups[0] if groups else ""),
     }
 
-@app.route('/')
-def index():
-    payload = build_slide_payload()
+
+def render_viewer(viewer_key):
+    config = VIEWER_CONFIGS[viewer_key]
+    payload = build_slide_payload(
+        config["png_dirs"],
+        config["group_labels"],
+        config["default_panel_groups"],
+        config.get("base_regions"),
+    )
+    viewer_links = [
+        {
+            "key": key,
+            "title": viewer_config["title"],
+            "url": f"/{'' if key == 'main' else key}",
+        }
+        for key, viewer_config in VIEWER_CONFIGS.items()
+    ]
     return render_template(
         'index.html',
         slides=payload["slides"],
@@ -160,12 +241,41 @@ def index():
         default_region=payload["default_region"],
         group_labels=payload["group_labels"],
         region_labels=payload["region_labels"],
+        compare_group=payload["compare_group"],
+        page_title=config["title"],
+        viewer_links=viewer_links,
+        current_viewer=viewer_key,
+        slide_data_url=url_for('slide_data_view', viewer_key=viewer_key),
     )
+
+
+@app.route('/')
+def index():
+    return render_viewer("main")
+
+
+@app.route('/gefs')
+def gefs_view():
+    return render_viewer("gefs")
 
 
 @app.route('/slide-data')
 def slide_data():
-    payload = build_slide_payload()
+    return slide_data_view('main')
+
+
+@app.route('/slide-data/<viewer_key>')
+def slide_data_view(viewer_key):
+    if viewer_key not in VIEWER_CONFIGS:
+        abort(404)
+
+    config = VIEWER_CONFIGS[viewer_key]
+    payload = build_slide_payload(
+        config["png_dirs"],
+        config["group_labels"],
+        config["default_panel_groups"],
+        config.get("base_regions"),
+    )
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
     response.headers['Pragma'] = 'no-cache'
@@ -174,7 +284,7 @@ def slide_data():
 
 @app.route('/pngs/<group>/<region>/<filename>')
 def serve_region_png(group, region, filename):
-    dir_path = PNG_DIRS.get(group)
+    dir_path = resolve_png_dir(MAIN_PNG_DIRS.get(group) or GEFS_PNG_DIRS.get(group))
     if not dir_path or not dir_path.is_dir():
         abort(404)
 
