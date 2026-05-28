@@ -82,12 +82,14 @@ def run_scripts(scripts, max_workers):
 MAIN_PNG_DIRS = {
     "main_NWP": BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "png",
     "total_precip": BASE_DIR / "EURO_GFS_TOTAL_PRECIP_OUTPUT" / "png",
+    "total_snow": BASE_DIR / "EURO_GFS_TOTAL_SNOW_OUTPUT" / "png",
     "temp_2m": BASE_DIR / "EURO_GFS_T2M_OUTPUT" / "png",
 }
 
 MAIN_GROUP_LABELS = {
     "main_NWP": "Main NWP",
     "total_precip": "Total Precip",
+    "total_snow": "Total Snow",
     "temp_2m": "2m Temp",
 }
 
@@ -323,6 +325,7 @@ def run_task2():
     scripts = [
         ("/opt/render/project/src/main_models_run/prate_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
         ("/opt/render/project/src/main_models_run/total_precip_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
+        ("/opt/render/project/src/main_models_run/total_snowfall_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
         ("/opt/render/project/src/main_models_run/temp_2m_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
     ]
     threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
