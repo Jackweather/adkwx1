@@ -508,6 +508,15 @@
                         {% endfor %}
                     </select>
                 </label>
+                <label class="view-control" id="archiveControl" for="archiveSelect" hidden>
+                    <span class="view-control-label">Archive</span>
+                    <select id="archiveSelect" class="view-select" aria-label="Choose archive run">
+                        <option value="current" selected>Current</option>
+                        {% for archive_run in archive_data.runs %}
+                        <option value="{{ archive_run.key }}">{{ archive_run.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
                 <button type="button" class="compare-toggle" id="compareToggle">Compare to Main NWP</button>
             </div>
             <div class="slider-container">
@@ -543,6 +552,7 @@
     <script id="groupLabels" type="application/json">{{ group_labels | tojson }}</script>
     <script id="regionLabels" type="application/json">{{ region_labels | tojson }}</script>
     <script id="compareGroup" type="application/json">{{ compare_group | tojson }}</script>
+    <script id="archiveData" type="application/json">{{ archive_data | tojson }}</script>
     <script id="slideDataUrl" type="application/json">{{ slide_data_url | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
@@ -553,9 +563,12 @@
         const groupLabelsElement = document.getElementById('groupLabels');
         const regionLabelsElement = document.getElementById('regionLabels');
         const compareGroupElement = document.getElementById('compareGroup');
+        const archiveDataElement = document.getElementById('archiveData');
         const slideDataUrlElement = document.getElementById('slideDataUrl');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
         const regionSelect = document.getElementById('regionSelect');
+        const archiveControl = document.getElementById('archiveControl');
+        const archiveSelect = document.getElementById('archiveSelect');
         const compareToggle = document.getElementById('compareToggle');
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
@@ -563,22 +576,55 @@
         const DEFAULT_REGION = defaultRegionElement ? JSON.parse(defaultRegionElement.textContent) : 'conus';
         const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
         let regionLabels = regionLabelsElement ? JSON.parse(regionLabelsElement.textContent) : {};
+        let archiveData = normalizeArchiveData(archiveDataElement ? JSON.parse(archiveDataElement.textContent) : null);
         const slideDataUrl = slideDataUrlElement ? JSON.parse(slideDataUrlElement.textContent) : '/slide-data';
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
         const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
         const COMPARE_GROUP = compareGroupElement ? JSON.parse(compareGroupElement.textContent) : DEFAULT_PRIMARY_GROUP;
+        const ARCHIVE_GROUP = archiveData.group || '';
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
-        let lastSlideSignature = JSON.stringify(slideData);
         const REFRESH_INTERVAL_MS = 30000;
         const PRIMARY_GROUP_KEY = 'adkwx-primary-group-v1';
         const REGION_KEY = 'adkwx-region-v1';
         const COMPARE_MODE_KEY = 'adkwx-compare-main-nwp-v1';
+        const ARCHIVE_RUN_KEY = 'adkwx-main-nwp-archive-run-v1';
         let selectedPrimaryGroup = DEFAULT_PRIMARY_GROUP;
         let selectedRegion = DEFAULT_REGION;
+        let selectedArchiveRun = 'current';
         let compareWithMainNwp = false;
         let slideElements = [];
         let currentSlideIndex = 0;
+        let lastSlideSignature = buildPayloadSignature(slideData, availableRegions, archiveData);
+
+        function normalizeArchiveData(value) {
+            if (!value || typeof value !== 'object') {
+                return { group: '', runs: [], images: {} };
+            }
+
+            const runs = Array.isArray(value.runs)
+                ? value.runs
+                    .filter((run) => run && typeof run.key === 'string')
+                    .map((run) => ({
+                        key: run.key,
+                        label: typeof run.label === 'string' ? run.label : run.key,
+                    }))
+                : [];
+
+            return {
+                group: typeof value.group === 'string' ? value.group : '',
+                runs,
+                images: value.images && typeof value.images === 'object' ? value.images : {},
+            };
+        }
+
+        function buildPayloadSignature(slides, regions, archive) {
+            return JSON.stringify({
+                slides,
+                regions,
+                archive_runs: archive.runs,
+            });
+        }
 
         function readStoredValue(key) {
             try {
@@ -599,6 +645,11 @@
             selectedRegion = storedRegion;
         }
 
+        const storedArchiveRun = readStoredValue(ARCHIVE_RUN_KEY);
+        if (storedArchiveRun === 'current' || archiveData.runs.some((run) => run.key === storedArchiveRun)) {
+            selectedArchiveRun = storedArchiveRun || 'current';
+        }
+
         compareWithMainNwp = readStoredValue(COMPARE_MODE_KEY) === 'true';
 
         function saveSelectedPrimaryGroup() {
@@ -614,6 +665,14 @@
                 window.localStorage.setItem(REGION_KEY, selectedRegion);
             } catch (error) {
                 console.warn('Failed to save region', error);
+            }
+        }
+
+        function saveSelectedArchiveRun() {
+            try {
+                window.localStorage.setItem(ARCHIVE_RUN_KEY, selectedArchiveRun);
+            } catch (error) {
+                console.warn('Failed to save archive run', error);
             }
         }
 
@@ -639,13 +698,56 @@
             return region.replaceAll('_', ' ');
         }
 
+        function getArchiveRunLabel(archiveKey) {
+            const match = archiveData.runs.find((run) => run.key === archiveKey);
+            return match ? match.label : archiveKey;
+        }
+
+        function refreshArchiveOptions() {
+            if (!archiveSelect) {
+                return;
+            }
+
+            archiveSelect.innerHTML = '';
+
+            const currentOption = document.createElement('option');
+            currentOption.value = 'current';
+            currentOption.textContent = 'Current';
+            archiveSelect.appendChild(currentOption);
+
+            archiveData.runs.forEach((run) => {
+                const option = document.createElement('option');
+                option.value = run.key;
+                option.textContent = run.label;
+                archiveSelect.appendChild(option);
+            });
+
+            const archiveRunExists = selectedArchiveRun === 'current' || archiveData.runs.some((run) => run.key === selectedArchiveRun);
+            if (!archiveRunExists) {
+                selectedArchiveRun = 'current';
+            }
+
+            archiveSelect.value = selectedArchiveRun;
+        }
+
         function syncToolbarControls() {
+            refreshArchiveOptions();
+
             if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
                 primaryGroupSelect.value = selectedPrimaryGroup;
             }
 
             if (regionSelect && regionSelect.value !== selectedRegion) {
                 regionSelect.value = selectedRegion;
+            }
+
+            const showArchiveControl = Boolean(ARCHIVE_GROUP) && selectedPrimaryGroup === ARCHIVE_GROUP && archiveData.runs.length > 0;
+            if (archiveControl) {
+                archiveControl.hidden = !showArchiveControl;
+            }
+            if (archiveSelect) {
+                archiveSelect.disabled = !showArchiveControl;
+                archiveSelect.value = selectedArchiveRun;
             }
 
             const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
@@ -664,8 +766,30 @@
             }
         }
 
+        function getPanelArchiveSuffix(group) {
+            if (group === ARCHIVE_GROUP && selectedArchiveRun !== 'current') {
+                return getArchiveRunLabel(selectedArchiveRun);
+            }
+            return '';
+        }
+
+        function getImageDataForGroup(slide, group) {
+            if (!group) {
+                return null;
+            }
+
+            if (group === ARCHIVE_GROUP && selectedArchiveRun !== 'current') {
+                const archiveRegionMap = archiveData.images[selectedArchiveRun] || {};
+                const archiveImages = archiveRegionMap[selectedRegion] || {};
+                return archiveImages[slide.index] || null;
+            }
+
+            return slide.images[group] ? slide.images[group][selectedRegion] : null;
+        }
+
         function createPanelElement(slide, group) {
-            const imageData = group && slide.images[group] ? slide.images[group][selectedRegion] : null;
+            const imageData = getImageDataForGroup(slide, group);
+            const archiveSuffix = getPanelArchiveSuffix(group);
 
             const panel = document.createElement('div');
             panel.className = 'panel';
@@ -676,7 +800,9 @@
 
             const panelLabel = document.createElement('div');
             panelLabel.className = 'panel-label';
-            panelLabel.textContent = `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)}`;
+            panelLabel.textContent = archiveSuffix
+                ? `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)} · ${archiveSuffix}`
+                : `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)}`;
 
             panelHeader.appendChild(panelLabel);
 
@@ -686,7 +812,9 @@
 
             const empty = document.createElement('div');
             empty.className = 'empty';
-            empty.textContent = `No image for ${formatGroupLabel(group)} in ${formatRegionLabel(selectedRegion)}`;
+            empty.textContent = archiveSuffix
+                ? `No image for ${formatGroupLabel(group)} in ${formatRegionLabel(selectedRegion)} for ${archiveSuffix}`
+                : `No image for ${formatGroupLabel(group)} in ${formatRegionLabel(selectedRegion)}`;
 
             if (imageData) {
                 image.src = buildImageUrl(group, selectedRegion, imageData);
@@ -699,22 +827,6 @@
             panel.appendChild(image);
             panel.appendChild(empty);
             return panel;
-        }
-
-        function updateSlidePanels(index) {
-            const slide = slideElements[index];
-            const data = slideData[index];
-            if (!slide || !data) {
-                return;
-            }
-
-            slide.innerHTML = '';
-            slide.classList.toggle('is-compare', compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP);
-            slide.appendChild(createPanelElement(data, selectedPrimaryGroup));
-
-            if (compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP) {
-                slide.appendChild(createPanelElement(data, COMPARE_GROUP));
-            }
         }
 
         function renderSlides() {
@@ -746,7 +858,11 @@
 
         function buildImageUrl(group, region, image) {
             const filename = encodeURIComponent(image.filename);
-            return `/pngs/${encodeURIComponent(group)}/${encodeURIComponent(region)}/${filename}?v=${encodeURIComponent(image.version)}`;
+            let url = `/pngs/${encodeURIComponent(group)}/${encodeURIComponent(region)}/${filename}?v=${encodeURIComponent(image.version)}`;
+            if (group === ARCHIVE_GROUP && selectedArchiveRun !== 'current') {
+                url += `&archive=${encodeURIComponent(selectedArchiveRun)}`;
+            }
+            return url;
         }
 
         function updateSlidePanels(index) {
@@ -793,18 +909,23 @@
                 const nextSlides = Array.isArray(payload.slides) ? payload.slides : [];
                 const nextRegions = Array.isArray(payload.regions) ? payload.regions : availableRegions;
                 const nextRegionLabels = payload.region_labels && typeof payload.region_labels === 'object' ? payload.region_labels : regionLabels;
-                const nextSignature = JSON.stringify({ slides: nextSlides, regions: nextRegions });
+                const nextArchiveData = normalizeArchiveData(payload.archive);
+                const nextSignature = buildPayloadSignature(nextSlides, nextRegions, nextArchiveData);
                 if (nextSignature !== lastSlideSignature) {
                     slideData = nextSlides;
                     availableRegions = nextRegions;
                     regionLabels = nextRegionLabels;
+                    archiveData = nextArchiveData;
                     if (!availableRegions.includes(selectedRegion)) {
                         selectedRegion = availableRegions.includes(DEFAULT_REGION) ? DEFAULT_REGION : (availableRegions[0] || DEFAULT_REGION);
                     }
                     lastSlideSignature = nextSignature;
+                    saveSelectedArchiveRun();
                     renderSlides();
                 } else {
                     slideData = nextSlides;
+                    archiveData = nextArchiveData;
+                    syncToolbarControls();
                     updateSlidePanels(currentSlideIndex);
                 }
             } catch (error) {
@@ -836,6 +957,14 @@
             });
         }
 
+        if (archiveSelect) {
+            archiveSelect.addEventListener('input', (event) => {
+                selectedArchiveRun = event.target.value;
+                saveSelectedArchiveRun();
+                renderSlides();
+            });
+        }
+
         if (compareToggle) {
             compareToggle.addEventListener('click', () => {
                 if (selectedPrimaryGroup === COMPARE_GROUP) {
@@ -850,6 +979,7 @@
         // initialize
         saveSelectedPrimaryGroup();
         saveSelectedRegion();
+        saveSelectedArchiveRun();
         saveCompareMode();
         renderSlides();
         window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
