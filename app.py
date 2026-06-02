@@ -1,6 +1,5 @@
-from flask import Flask, render_template, send_from_directory, abort, jsonify, request, url_for
+from flask import Flask, render_template, send_from_directory, abort, jsonify, url_for
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
-from datetime import datetime
 import os
 import subprocess
 import threading
@@ -15,9 +14,6 @@ app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 BASE_DIR = Path("/var/data") if Path("/var/data").exists() else Path(__file__).resolve().parent
-MAIN_NWP_ARCHIVE_GROUP = "main_NWP"
-MAIN_NWP_ARCHIVE_ROOT = BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "archive"
-ARCHIVE_KEY_PATTERN = re.compile(r'^\d{8}_\d{2}$')
 
 
 def resolve_png_dir(path_spec):
@@ -88,6 +84,7 @@ MAIN_PNG_DIRS = {
     "total_precip": BASE_DIR / "EURO_GFS_TOTAL_PRECIP_OUTPUT" / "png",
     "total_snow": BASE_DIR / "EURO_GFS_TOTAL_SNOW_OUTPUT" / "png",
     "temp_2m": BASE_DIR / "EURO_GFS_T2M_OUTPUT" / "png",
+    "gh_500": BASE_DIR / "EURO_GFS_GH500_OUTPUT" / "png",
 }
 
 MAIN_GROUP_LABELS = {
@@ -95,6 +92,7 @@ MAIN_GROUP_LABELS = {
     "total_precip": "Total Precip",
     "total_snow": "Total Snow",
     "temp_2m": "2m Temp",
+    "gh_500": "500mb Height",
 }
 
 MAIN_DEFAULT_PANEL_GROUPS = ["main_NWP"]
@@ -135,8 +133,6 @@ VIEWER_CONFIGS = {
         "group_labels": MAIN_GROUP_LABELS,
         "default_panel_groups": MAIN_DEFAULT_PANEL_GROUPS,
         "base_regions": ACTIVE_REGION_NAMES,
-        "archive_group": MAIN_NWP_ARCHIVE_GROUP,
-        "archive_root": MAIN_NWP_ARCHIVE_ROOT,
     },
     "gefs": {
         "title": "GEFS Viewer",
@@ -160,49 +156,7 @@ def build_image_entry(file_path):
     }
 
 
-def format_archive_label(archive_key):
-    try:
-        archive_dt = datetime.strptime(archive_key, "%Y%m%d_%H")
-    except ValueError:
-        return archive_key
-    return archive_dt.strftime("%Y-%m-%d %HZ")
-
-
-def collect_archive_payload(archive_group, archive_root):
-    if not archive_group or not archive_root.is_dir():
-        return {"group": "", "runs": [], "images": {}}
-
-    archive_runs = []
-    archive_images = {}
-    archive_dirs = sorted(
-        (child for child in archive_root.iterdir() if child.is_dir() and ARCHIVE_KEY_PATTERN.fullmatch(child.name)),
-        key=lambda child: child.name,
-        reverse=True,
-    )
-
-    for archive_dir in archive_dirs:
-        archive_key = archive_dir.name
-        archive_runs.append({"key": archive_key, "label": format_archive_label(archive_key)})
-        archive_images[archive_key] = {}
-
-        for file_path in sorted(archive_dir.glob("*.png")):
-            key, image_entry = build_image_entry(file_path)
-            archive_images[archive_key].setdefault(DEFAULT_REGION, {})[key] = image_entry
-
-        for region_dir in sorted(child for child in archive_dir.iterdir() if child.is_dir()):
-            region_name = region_dir.name
-            for file_path in sorted(region_dir.glob("*.png")):
-                key, image_entry = build_image_entry(file_path)
-                archive_images[archive_key].setdefault(region_name, {})[key] = image_entry
-
-    return {
-        "group": archive_group,
-        "runs": archive_runs,
-        "images": archive_images,
-    }
-
-
-def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regions=None, archive_group=None, archive_root=None):
+def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regions=None):
     group_files = {}
     discovered_regions = []
 
@@ -254,12 +208,6 @@ def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regio
             }
         })
 
-    archive_payload = collect_archive_payload(archive_group, archive_root) if archive_group and archive_root else {
-        "group": "",
-        "runs": [],
-        "images": {},
-    }
-
     return {
         "groups": groups,
         "regions": regions,
@@ -269,7 +217,6 @@ def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regio
         "group_labels": group_labels,
         "region_labels": {region: REGION_LABELS.get(region, region.replace('_', ' ').title()) for region in regions},
         "compare_group": default_panel_groups[0] if default_panel_groups else (groups[0] if groups else ""),
-        "archive": archive_payload,
     }
 
 
@@ -280,8 +227,6 @@ def render_viewer(viewer_key):
         config["group_labels"],
         config["default_panel_groups"],
         config.get("base_regions"),
-        config.get("archive_group"),
-        config.get("archive_root"),
     )
     viewer_links = [
         {
@@ -301,7 +246,6 @@ def render_viewer(viewer_key):
         group_labels=payload["group_labels"],
         region_labels=payload["region_labels"],
         compare_group=payload["compare_group"],
-        archive_data=payload["archive"],
         page_title=config["title"],
         viewer_links=viewer_links,
         current_viewer=viewer_key,
@@ -335,8 +279,6 @@ def slide_data_view(viewer_key):
         config["group_labels"],
         config["default_panel_groups"],
         config.get("base_regions"),
-        config.get("archive_group"),
-        config.get("archive_root"),
     )
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -346,17 +288,7 @@ def slide_data_view(viewer_key):
 
 @app.route('/pngs/<group>/<region>/<filename>')
 def serve_region_png(group, region, filename):
-    archive_key = request.args.get('archive', '').strip()
-    dir_path = None
-
-    if group == MAIN_NWP_ARCHIVE_GROUP and ARCHIVE_KEY_PATTERN.fullmatch(archive_key or ''):
-        archive_dir = MAIN_NWP_ARCHIVE_ROOT / archive_key
-        if archive_dir.is_dir():
-            dir_path = archive_dir
-
-    if dir_path is None:
-        dir_path = resolve_png_dir(MAIN_PNG_DIRS.get(group) or GEFS_PNG_DIRS.get(group))
-
+    dir_path = resolve_png_dir(MAIN_PNG_DIRS.get(group) or GEFS_PNG_DIRS.get(group))
     if not dir_path or not dir_path.is_dir():
         abort(404)
 
@@ -397,6 +329,7 @@ def run_task2():
         ("/opt/render/project/src/main_models_run/total_precip_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
         ("/opt/render/project/src/main_models_run/total_snowfall_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
         ("/opt/render/project/src/main_models_run/temp_2m_type_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
+        ("/opt/render/project/src/main_models_run/geopotential_height_500_with_gfs_euro.py", "/opt/render/project/src/main_models_run"),
     ]
     threading.Thread(target=lambda: run_scripts(scripts, 2)).start()
     return "Task started in background! Check logs folder for output.", 200
