@@ -1,5 +1,6 @@
-from flask import Flask, render_template, send_from_directory, abort, jsonify, url_for
+from flask import Flask, render_template, send_from_directory, abort, jsonify, request, url_for
 from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
+from datetime import datetime
 import os
 import subprocess
 import threading
@@ -14,6 +15,8 @@ app = Flask(__name__)
 app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
 
 BASE_DIR = Path("/var/data") if Path("/var/data").exists() else Path(__file__).resolve().parent
+MAIN_NWP_GROUP = "main_NWP"
+MAIN_NWP_ARCHIVE_DIR = BASE_DIR / "EURO_GFS_PRATE_OUTPUT" / "archive"
 
 
 def resolve_png_dir(path_spec):
@@ -28,6 +31,53 @@ def resolve_png_dir(path_spec):
         return candidate
 
     return None
+
+
+def format_archive_label(archive_key):
+    try:
+        archive_time = datetime.strptime(archive_key, "%Y%m%d_%H")
+    except ValueError:
+        return archive_key
+
+    return archive_time.strftime("%b %d %HZ")
+
+
+def list_main_nwp_archives():
+    archive_options = [{"key": "current", "label": "Current run"}]
+    if not MAIN_NWP_ARCHIVE_DIR.is_dir():
+        return archive_options
+
+    dated_archives = []
+    for child in MAIN_NWP_ARCHIVE_DIR.iterdir():
+        if not child.is_dir():
+            continue
+        if not re.fullmatch(r"\d{8}_\d{2}", child.name):
+            continue
+        dated_archives.append(child.name)
+
+    for archive_key in sorted(dated_archives, reverse=True):
+        archive_options.append({"key": archive_key, "label": format_archive_label(archive_key)})
+
+    return archive_options
+
+
+def normalize_archive_key(archive_key):
+    if not archive_key or archive_key == "current":
+        return "current"
+
+    if re.fullmatch(r"\d{8}_\d{2}", archive_key) and (MAIN_NWP_ARCHIVE_DIR / archive_key).is_dir():
+        return archive_key
+
+    return "current"
+
+
+def resolve_group_dir(group, archive_key="current"):
+    if group == MAIN_NWP_GROUP and archive_key != "current":
+        archive_dir = MAIN_NWP_ARCHIVE_DIR / archive_key
+        if archive_dir.is_dir():
+            return archive_dir
+
+    return resolve_png_dir(MAIN_PNG_DIRS.get(group) or GEFS_PNG_DIRS.get(group))
 
 
 def run_scripts(scripts, max_workers):
@@ -156,13 +206,13 @@ def build_image_entry(file_path):
     }
 
 
-def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regions=None):
+def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regions=None, archive_key="current"):
     group_files = {}
     discovered_regions = []
 
     for group, path_spec in png_dirs.items():
         group_files[group] = {}
-        path = resolve_png_dir(path_spec)
+        path = resolve_group_dir(group, archive_key=archive_key)
         if path is None:
             continue
         if not path.is_dir():
@@ -217,16 +267,19 @@ def build_slide_payload(png_dirs, group_labels, default_panel_groups, base_regio
         "group_labels": group_labels,
         "region_labels": {region: REGION_LABELS.get(region, region.replace('_', ' ').title()) for region in regions},
         "compare_group": default_panel_groups[0] if default_panel_groups else (groups[0] if groups else ""),
+        "archive_options": list_main_nwp_archives() if MAIN_NWP_GROUP in groups else [],
+        "active_archive": archive_key,
     }
 
 
-def render_viewer(viewer_key):
+def render_viewer(viewer_key, archive_key="current"):
     config = VIEWER_CONFIGS[viewer_key]
     payload = build_slide_payload(
         config["png_dirs"],
         config["group_labels"],
         config["default_panel_groups"],
         config.get("base_regions"),
+        archive_key=archive_key,
     )
     viewer_links = [
         {
@@ -246,6 +299,8 @@ def render_viewer(viewer_key):
         group_labels=payload["group_labels"],
         region_labels=payload["region_labels"],
         compare_group=payload["compare_group"],
+        archive_options=payload["archive_options"],
+        active_archive=payload["active_archive"],
         page_title=config["title"],
         viewer_links=viewer_links,
         current_viewer=viewer_key,
@@ -255,7 +310,8 @@ def render_viewer(viewer_key):
 
 @app.route('/')
 def index():
-    return render_viewer("main")
+    archive_key = normalize_archive_key(request.args.get('archive'))
+    return render_viewer("main", archive_key=archive_key)
 
 
 @app.route('/gefs')
@@ -274,11 +330,13 @@ def slide_data_view(viewer_key):
         abort(404)
 
     config = VIEWER_CONFIGS[viewer_key]
+    archive_key = normalize_archive_key(request.args.get('archive')) if viewer_key == 'main' else 'current'
     payload = build_slide_payload(
         config["png_dirs"],
         config["group_labels"],
         config["default_panel_groups"],
         config.get("base_regions"),
+        archive_key=archive_key,
     )
     response = jsonify(payload)
     response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
@@ -288,7 +346,8 @@ def slide_data_view(viewer_key):
 
 @app.route('/pngs/<group>/<region>/<filename>')
 def serve_region_png(group, region, filename):
-    dir_path = resolve_png_dir(MAIN_PNG_DIRS.get(group) or GEFS_PNG_DIRS.get(group))
+    archive_key = normalize_archive_key(request.args.get('archive')) if group == MAIN_NWP_GROUP else 'current'
+    dir_path = resolve_group_dir(group, archive_key=archive_key)
     if not dir_path or not dir_path.is_dir():
         abort(404)
 
