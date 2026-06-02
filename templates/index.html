@@ -508,6 +508,14 @@
                         {% endfor %}
                     </select>
                 </label>
+                <label class="view-control" for="archiveSelect"{% if not archive_options %} hidden{% endif %}>
+                    <span class="view-control-label">PRATE Run</span>
+                    <select id="archiveSelect" class="view-select" aria-label="Choose PRATE archive run">
+                        {% for archive_option in archive_options %}
+                        <option value="{{ archive_option.key }}"{% if archive_option.key == active_archive %} selected{% endif %}>{{ archive_option.label }}</option>
+                        {% endfor %}
+                    </select>
+                </label>
                 <button type="button" class="compare-toggle" id="compareToggle">Compare to {{ group_labels.get(compare_group, compare_group) }}</button>
             </div>
             <div class="slider-container">
@@ -543,6 +551,8 @@
     <script id="groupLabels" type="application/json">{{ group_labels | tojson }}</script>
     <script id="regionLabels" type="application/json">{{ region_labels | tojson }}</script>
     <script id="compareGroup" type="application/json">{{ compare_group | tojson }}</script>
+    <script id="archiveOptions" type="application/json">{{ archive_options | tojson }}</script>
+    <script id="activeArchive" type="application/json">{{ active_archive | tojson }}</script>
     <script id="slideDataUrl" type="application/json">{{ slide_data_url | tojson }}</script>
     <script>
         const sliderContainer = document.querySelector('.slider-container');
@@ -553,9 +563,12 @@
         const groupLabelsElement = document.getElementById('groupLabels');
         const regionLabelsElement = document.getElementById('regionLabels');
         const compareGroupElement = document.getElementById('compareGroup');
+        const archiveOptionsElement = document.getElementById('archiveOptions');
+        const activeArchiveElement = document.getElementById('activeArchive');
         const slideDataUrlElement = document.getElementById('slideDataUrl');
         const primaryGroupSelect = document.getElementById('primaryGroupSelect');
         const regionSelect = document.getElementById('regionSelect');
+        const archiveSelect = document.getElementById('archiveSelect');
         const compareToggle = document.getElementById('compareToggle');
         let slideData = slideDataElement ? JSON.parse(slideDataElement.textContent) : [];
         const defaultPanelGroups = defaultPanelGroupsElement ? JSON.parse(defaultPanelGroupsElement.textContent) : [];
@@ -563,19 +576,23 @@
         const DEFAULT_REGION = defaultRegionElement ? JSON.parse(defaultRegionElement.textContent) : 'conus';
         const groupLabels = groupLabelsElement ? JSON.parse(groupLabelsElement.textContent) : {};
         let regionLabels = regionLabelsElement ? JSON.parse(regionLabelsElement.textContent) : {};
+        let archiveOptions = archiveOptionsElement ? JSON.parse(archiveOptionsElement.textContent) : [];
+        const ACTIVE_ARCHIVE = activeArchiveElement ? JSON.parse(activeArchiveElement.textContent) : 'current';
         const slideDataUrl = slideDataUrlElement ? JSON.parse(slideDataUrlElement.textContent) : '/slide-data';
         const allGroups = primaryGroupSelect ? Array.from(primaryGroupSelect.options).map((option) => option.value) : [];
         const DEFAULT_PRIMARY_GROUP = defaultPanelGroups[0] || allGroups[0] || '';
         const COMPARE_GROUP = compareGroupElement ? JSON.parse(compareGroupElement.textContent) : DEFAULT_PRIMARY_GROUP;
         const sliderBar = document.getElementById('sliderBar');
         const forecastHour = document.getElementById('forecastHour');
-        let lastSlideSignature = JSON.stringify(slideData);
+        let lastSlideSignature = JSON.stringify({ archive: ACTIVE_ARCHIVE, slides: slideData, regions: availableRegions });
         const REFRESH_INTERVAL_MS = 30000;
         const PRIMARY_GROUP_KEY = 'adkwx-primary-group-v1';
         const REGION_KEY = 'adkwx-region-v1';
         const COMPARE_MODE_KEY = 'adkwx-compare-group-v1';
+        const ARCHIVE_KEY = 'adkwx-main-prate-archive-v1';
         let selectedPrimaryGroup = DEFAULT_PRIMARY_GROUP;
         let selectedRegion = DEFAULT_REGION;
+        let selectedArchive = ACTIVE_ARCHIVE;
         let compareWithMainNwp = false;
         let slideElements = [];
         let currentSlideIndex = 0;
@@ -601,6 +618,12 @@
 
         compareWithMainNwp = readStoredValue(COMPARE_MODE_KEY) === 'true';
 
+        const archiveOptionValues = archiveOptions.map((option) => option.key);
+        const storedArchive = readStoredValue(ARCHIVE_KEY);
+        if (storedArchive && archiveOptionValues.includes(storedArchive)) {
+            selectedArchive = storedArchive;
+        }
+
         function saveSelectedPrimaryGroup() {
             try {
                 window.localStorage.setItem(PRIMARY_GROUP_KEY, selectedPrimaryGroup);
@@ -625,6 +648,14 @@
             }
         }
 
+        function saveSelectedArchive() {
+            try {
+                window.localStorage.setItem(ARCHIVE_KEY, selectedArchive);
+            } catch (error) {
+                console.warn('Failed to save archive selection', error);
+            }
+        }
+
         function formatGroupLabel(group) {
             if (groupLabels[group]) {
                 return groupLabels[group];
@@ -639,6 +670,37 @@
             return region.replaceAll('_', ' ');
         }
 
+        function formatArchiveLabel(archiveKey) {
+            const match = archiveOptions.find((option) => option.key === archiveKey);
+            if (match) {
+                return match.label;
+            }
+            return archiveKey;
+        }
+
+        function syncArchiveOptions() {
+            if (!archiveSelect) {
+                return;
+            }
+
+            archiveSelect.innerHTML = '';
+            archiveOptions.forEach((option) => {
+                const optionElement = document.createElement('option');
+                optionElement.value = option.key;
+                optionElement.textContent = option.label;
+                if (option.key === selectedArchive) {
+                    optionElement.selected = true;
+                }
+                archiveSelect.appendChild(optionElement);
+            });
+
+            if (!archiveOptions.some((option) => option.key === selectedArchive)) {
+                selectedArchive = ACTIVE_ARCHIVE;
+            }
+
+            archiveSelect.value = selectedArchive;
+        }
+
         function syncToolbarControls() {
             if (primaryGroupSelect && primaryGroupSelect.value !== selectedPrimaryGroup) {
                 primaryGroupSelect.value = selectedPrimaryGroup;
@@ -647,6 +709,8 @@
             if (regionSelect && regionSelect.value !== selectedRegion) {
                 regionSelect.value = selectedRegion;
             }
+
+            syncArchiveOptions();
 
             const compareDisabled = selectedPrimaryGroup === COMPARE_GROUP;
             if (compareDisabled) {
@@ -676,7 +740,10 @@
 
             const panelLabel = document.createElement('div');
             panelLabel.className = 'panel-label';
-            panelLabel.textContent = `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)}`;
+            const archiveSuffix = group === COMPARE_GROUP && selectedArchive !== 'current'
+                ? ` · ${formatArchiveLabel(selectedArchive)}`
+                : '';
+            panelLabel.textContent = `${formatGroupLabel(group)} · ${formatRegionLabel(selectedRegion)}${archiveSuffix}`;
 
             panelHeader.appendChild(panelLabel);
 
@@ -746,23 +813,11 @@
 
         function buildImageUrl(group, region, image) {
             const filename = encodeURIComponent(image.filename);
-            return `/pngs/${encodeURIComponent(group)}/${encodeURIComponent(region)}/${filename}?v=${encodeURIComponent(image.version)}`;
-        }
-
-        function updateSlidePanels(index) {
-            const slide = slideElements[index];
-            const data = slideData[index];
-            if (!slide || !data) {
-                return;
+            const params = new URLSearchParams({ v: image.version });
+            if (group === COMPARE_GROUP && selectedArchive !== 'current') {
+                params.set('archive', selectedArchive);
             }
-
-            slide.innerHTML = '';
-            slide.classList.toggle('is-compare', compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP);
-            slide.appendChild(createPanelElement(data, selectedPrimaryGroup));
-
-            if (compareWithMainNwp && selectedPrimaryGroup !== COMPARE_GROUP) {
-                slide.appendChild(createPanelElement(data, COMPARE_GROUP));
-            }
+            return `/pngs/${encodeURIComponent(group)}/${encodeURIComponent(region)}/${filename}?${params.toString()}`;
         }
 
         function formatIndex(idx) {
@@ -779,7 +834,12 @@
 
         async function refreshSlideData() {
             try {
-                const response = await fetch(slideDataUrl, {
+                const query = new URLSearchParams();
+                if (selectedArchive !== 'current') {
+                    query.set('archive', selectedArchive);
+                }
+
+                const response = await fetch(query.toString() ? `${slideDataUrl}?${query.toString()}` : slideDataUrl, {
                     cache: 'no-store',
                     headers: {
                         'Cache-Control': 'no-cache'
@@ -793,7 +853,11 @@
                 const nextSlides = Array.isArray(payload.slides) ? payload.slides : [];
                 const nextRegions = Array.isArray(payload.regions) ? payload.regions : availableRegions;
                 const nextRegionLabels = payload.region_labels && typeof payload.region_labels === 'object' ? payload.region_labels : regionLabels;
-                const nextSignature = JSON.stringify({ slides: nextSlides, regions: nextRegions });
+                const nextArchiveOptions = Array.isArray(payload.archive_options) ? payload.archive_options : archiveOptions;
+                const nextArchive = payload.active_archive || 'current';
+                const nextSignature = JSON.stringify({ archive: nextArchive, slides: nextSlides, regions: nextRegions });
+                archiveOptions = nextArchiveOptions;
+                selectedArchive = nextArchive;
                 if (nextSignature !== lastSlideSignature) {
                     slideData = nextSlides;
                     availableRegions = nextRegions;
@@ -847,11 +911,23 @@
             });
         }
 
+        if (archiveSelect) {
+            archiveSelect.addEventListener('input', async (event) => {
+                selectedArchive = event.target.value;
+                saveSelectedArchive();
+                await refreshSlideData();
+            });
+        }
+
         // initialize
         saveSelectedPrimaryGroup();
         saveSelectedRegion();
         saveCompareMode();
+        saveSelectedArchive();
         renderSlides();
+        if (selectedArchive !== ACTIVE_ARCHIVE) {
+            refreshSlideData();
+        }
         window.setInterval(refreshSlideData, REFRESH_INTERVAL_MS);
     </script>
 </body>
