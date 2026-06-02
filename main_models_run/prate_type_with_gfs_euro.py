@@ -32,7 +32,7 @@ ARCHIVE_DIR = BASE_DIR / "archive"
 LOG_FILE = BASE_DIR / "errors_euro_gfs_prate.txt"
 
 MAX_DOWNLOAD_RETRIES = 3
-ARCHIVE_RETENTION_DAYS = 3
+ARCHIVE_RETENTION = timedelta(days=3)
 LOCAL_TZ = ZoneInfo("America/New_York")
 GFS_FILTER_URL = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 ICON_BASE_URL = "https://opendata.dwd.de/weather/nwp/icon/grib"
@@ -88,29 +88,6 @@ def prepare_output_dirs():
         LOG_FILE.unlink()
 
 
-def build_archive_run_key(run_datetime):
-    return run_datetime.strftime("%Y%m%d_%H")
-
-
-def prune_archive_dirs(reference_time):
-    cutoff = reference_time - timedelta(days=ARCHIVE_RETENTION_DAYS)
-    for child in ARCHIVE_DIR.iterdir():
-        if not child.is_dir():
-            continue
-        try:
-            archive_time = datetime.strptime(child.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc)
-        except ValueError:
-            continue
-        if archive_time < cutoff:
-            shutil.rmtree(child)
-
-
-def archive_png(output_path, archive_run_key, region_name):
-    archive_region_dir = ARCHIVE_DIR / archive_run_key / region_name
-    archive_region_dir.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(output_path, archive_region_dir / output_path.name)
-
-
 def log_error(step_str, context, error):
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     with LOG_FILE.open("a", encoding="utf-8") as handle:
@@ -119,6 +96,34 @@ def log_error(step_str, context, error):
 
 def log_optional_model_failure(step_str, model_name, error):
     log_error(step_str, f"{model_name} unavailable for this hour; continuing with remaining models", error)
+
+
+def get_archive_run_dir(run_datetime):
+    return ARCHIVE_DIR / run_datetime.strftime("%Y%m%d_%H")
+
+
+def archive_png_outputs(run_datetime):
+    archive_run_dir = get_archive_run_dir(run_datetime)
+    if archive_run_dir.exists():
+        shutil.rmtree(archive_run_dir)
+
+    shutil.copytree(PNG_DIR, archive_run_dir)
+    return archive_run_dir
+
+
+def prune_archive_dirs(reference_time):
+    cutoff = reference_time - ARCHIVE_RETENTION
+    for child in ARCHIVE_DIR.iterdir():
+        if not child.is_dir():
+            continue
+
+        try:
+            archive_time = datetime.strptime(child.name, "%Y%m%d_%H").replace(tzinfo=timezone.utc)
+        except ValueError:
+            continue
+
+        if archive_time < cutoff:
+            shutil.rmtree(child, ignore_errors=True)
 
 
 def find_latest_gfs_run():
@@ -535,7 +540,7 @@ def plot_lows_highs(ax, lon2d, lat2d, data, extent, min_distance=5, edge_buffer=
         value_text.set_path_effects([mpe.withStroke(linewidth=2.0, foreground="white")])
 
 
-def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, forecast_hour, step_str, archive_run_key):
+def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, forecast_hour, step_str):
     gfs_run = available_runs[0][1]
     valid_utc, local_time, local_day = format_valid_time(gfs_run, forecast_hour)
     lon2d, lat2d = np.meshgrid(avg_prate.longitude.values, avg_prate.latitude.values)
@@ -640,7 +645,6 @@ def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, fore
         output_path = PNG_DIR / region_name / f"euro_gfs_prate_mslp_avg_{step_str}.png"
         plt.savefig(output_path, bbox_inches="tight", dpi=300)
         plt.close(fig)
-        archive_png(output_path, archive_run_key, region_name)
         print(f"Saved PNG: {output_path}")
 
 
@@ -649,8 +653,6 @@ def main():
 
     gfs_run_date, gfs_run_hour = find_latest_gfs_run()
     gfs_run = datetime.strptime(f"{gfs_run_date} {gfs_run_hour}", "%Y%m%d %H").replace(tzinfo=timezone.utc)
-    archive_run_key = build_archive_run_key(gfs_run)
-    prune_archive_dirs(gfs_run)
     run_config = get_run_configuration(gfs_run_hour)
     forecast_steps = get_forecast_steps(gfs_run_hour)
     print(f"Processing forecast hours through FH{forecast_steps[-1]:03d} for GFS {gfs_run_hour}Z")
@@ -922,7 +924,6 @@ def main():
                 available_runs,
                 forecast_hour,
                 step_str,
-                archive_run_key,
             )
 
         except Exception as exc:
@@ -942,6 +943,9 @@ def main():
             gdps_snow_path.unlink(missing_ok=True)
             gc.collect()
 
+            archive_dir = archive_png_outputs(gfs_run)
+            prune_archive_dirs(gfs_run)
+            print(f"Archived PRATE PNGs to {archive_dir}")
     print(f"Finished generating GFS + ECMWF + ICON + GDPS PRATE/MSLP PNGs in {PNG_DIR}")
 
 
