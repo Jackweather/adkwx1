@@ -285,6 +285,7 @@ def open_scalar_pressure_level(path, level_hpa, variable_names=None, output_name
         return as_data_array(values, dataset["latitude"].values, dataset["longitude"].values, output_name)
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gfs_gh500(path):
@@ -304,6 +305,7 @@ def open_gdps_gh500(path):
         return as_data_array(values, dataset["latitude"].values, dataset["longitude"].values, "gdps_gh500_dam")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_icon_scalar_field(path, variable_name):
@@ -325,6 +327,7 @@ def open_icon_scalar_field(path, variable_name):
         )
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_icon_coord_field(path, variable_name):
@@ -333,6 +336,7 @@ def open_icon_coord_field(path, variable_name):
         return np.asarray(dataset[variable_name].squeeze().values, dtype=np.float64)
     finally:
         dataset.close()
+        gc.collect()
 
 
 def build_icon_indexer(icon_lats, icon_lons, gfs_field):
