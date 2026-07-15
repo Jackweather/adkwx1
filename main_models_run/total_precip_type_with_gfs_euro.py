@@ -280,6 +280,7 @@ def open_gfs_total_precip(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, "gfs_total_precip_mm")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gfs_mslp(path):
@@ -290,6 +291,7 @@ def open_gfs_mslp(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, "gfs_mslp")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gfs_csnow(path):
@@ -300,6 +302,7 @@ def open_gfs_csnow(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, "gfs_csnow")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_ecmwf_fields(path):
@@ -328,6 +331,7 @@ def open_ecmwf_fields(path):
     finally:
         mean_sea_dataset.close()
         accum_dataset.close()
+        gc.collect()
 
 
 def open_gdps_scalar_field(path, name, scale=1.0):
@@ -338,6 +342,7 @@ def open_gdps_scalar_field(path, name, scale=1.0):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, f"gdps_{variable_name}")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gdps_mslp(path):
@@ -358,6 +363,7 @@ def open_icon_coord_field(path, variable_name):
         return np.asarray(dataset[variable_name].squeeze().values, dtype=np.float64)
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_icon_scalar_field(path, variable_name, scale=1.0):
@@ -377,6 +383,7 @@ def open_icon_scalar_field(path, variable_name, scale=1.0):
         )
     finally:
         dataset.close()
+        gc.collect()
 
 
 def build_icon_indexer(icon_lats, icon_lons, gfs_field):
