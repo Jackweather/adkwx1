@@ -63,14 +63,17 @@ MSLP_LEVELS = np.arange(960, 1060, 4)
 
 
 def get_run_configuration(run_hour):
+    # Always produce blended PNGs through FH240 (primary and non-primary).
+    # ICON should only be used through FH180; beyond that it is ignored.
     run_hour_int = int(run_hour)
     is_primary_cycle = run_hour_int in {0, 12}
     return {
-        "blend_max_hour": 240 if is_primary_cycle else 144,
+        "blend_max_hour": 240,
         "gfs_max_hour": 384,
         "ecmwf_max_hour": 360 if is_primary_cycle else 144,
         "gdps_max_hour": 240,
-        "icon_max_hour": 180 if is_primary_cycle else 120,
+        # ICON cutoff at FH180 regardless of cycle; use ICON only up to 180h
+        "icon_max_hour": 180,
     }
 
 
