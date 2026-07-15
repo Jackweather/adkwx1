@@ -99,6 +99,10 @@ def log_error(step_str, context, error):
         handle.write(f"[{timestamp}] FH{step_str} | {context} | {error}\n")
 
 
+def log_optional_model_failure(step_str, model_name, error):
+    log_error(step_str, f"{model_name} unavailable for this hour; continuing with remaining models", error)
+
+
 def find_latest_gfs_run():
     now_utc = datetime.now(timezone.utc).replace(minute=0, second=0, microsecond=0)
     candidate = now_utc.replace(hour=(now_utc.hour // 6) * 6)
@@ -700,54 +704,69 @@ def main():
                 f"GFS APCP FH{step_str}",
             )
 
+            ecmwf_available = ecmwf_available
             if ecmwf_available:
-                ecmwf_client.retrieve(
-                    date=int(ecmwf_run.strftime("%Y%m%d")),
-                    time=ecmwf_run.hour,
-                    type="fc",
-                    step=forecast_hour,
-                    param=["msl", "tp", "sf"],
-                    target=str(ecmwf_path),
-                )
+                try:
+                    ecmwf_client.retrieve(
+                        date=int(ecmwf_run.strftime("%Y%m%d")),
+                        time=ecmwf_run.hour,
+                        type="fc",
+                        step=forecast_hour,
+                        param=["msl", "tp", "sf"],
+                        target=str(ecmwf_path),
+                    )
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ECMWF", exc)
+                    ecmwf_available = False
 
+            icon_available = icon_available
             if icon_available:
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
-                    icon_pmsl_path,
-                    f"ICON PMSL FH{step_str}",
-                )
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "tot_prec", step_str, "TOT_PREC"),
-                    icon_tp_path,
-                    f"ICON TOT_PREC FH{step_str}",
-                )
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "snow_gsp", step_str, "SNOW_GSP"),
-                    icon_snow_gsp_path,
-                    f"ICON SNOW_GSP FH{step_str}",
-                )
-                download_bz2_file(
-                    build_icon_field_url(icon_run_date, icon_run_hour, "snow_con", step_str, "SNOW_CON"),
-                    icon_snow_con_path,
-                    f"ICON SNOW_CON FH{step_str}",
-                )
+                try:
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "pmsl", step_str, "PMSL"),
+                        icon_pmsl_path,
+                        f"ICON PMSL FH{step_str}",
+                    )
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "tot_prec", step_str, "TOT_PREC"),
+                        icon_tp_path,
+                        f"ICON TOT_PREC FH{step_str}",
+                    )
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "snow_gsp", step_str, "SNOW_GSP"),
+                        icon_snow_gsp_path,
+                        f"ICON SNOW_GSP FH{step_str}",
+                    )
+                    download_bz2_file(
+                        build_icon_field_url(icon_run_date, icon_run_hour, "snow_con", step_str, "SNOW_CON"),
+                        icon_snow_con_path,
+                        f"ICON SNOW_CON FH{step_str}",
+                    )
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "ICON", exc)
+                    icon_available = False
 
+            gdps_available = gdps_available
             if gdps_available:
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
-                    gdps_mslp_path,
-                    f"GDPS MSLP FH{step_str}",
-                )
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Precip-Accum6h_Sfc"),
-                    gdps_precip_path,
-                    f"GDPS Precip FH{step_str}",
-                )
-                download_file(
-                    build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Snow-Accum6h_Sfc"),
-                    gdps_snow_path,
-                    f"GDPS Snow FH{step_str}",
-                )
+                try:
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Pressure_MSL"),
+                        gdps_mslp_path,
+                        f"GDPS MSLP FH{step_str}",
+                    )
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Precip-Accum6h_Sfc"),
+                        gdps_precip_path,
+                        f"GDPS Precip FH{step_str}",
+                    )
+                    download_file(
+                        build_gdps_field_url(gdps_run_date, gdps_run_hour, step_str, "Snow-Accum6h_Sfc"),
+                        gdps_snow_path,
+                        f"GDPS Snow FH{step_str}",
+                    )
+                except Exception as exc:
+                    log_optional_model_failure(step_str, "GDPS", exc)
+                    gdps_available = False
 
             gfs_mslp = open_gfs_mslp(gfs_mslp_path)
             gfs_csnow = open_gfs_csnow(gfs_csnow_path)
