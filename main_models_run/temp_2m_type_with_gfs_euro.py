@@ -274,6 +274,7 @@ def open_gfs_t2m(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, "gfs_t2m_f")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gfs_mslp(path):
@@ -284,6 +285,7 @@ def open_gfs_mslp(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, "gfs_mslp")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_ecmwf_fields(path):
@@ -307,6 +309,7 @@ def open_ecmwf_fields(path):
     finally:
         mean_sea_dataset.close()
         t2m_dataset.close()
+        gc.collect()
 
 
 def open_gdps_scalar_field(path):
@@ -317,6 +320,7 @@ def open_gdps_scalar_field(path):
         return as_data_array(field, dataset["latitude"].values, dataset["longitude"].values, f"gdps_{variable_name}")
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_gdps_mslp(path):
@@ -348,6 +352,7 @@ def open_icon_scalar_field(path, variable_name, scale=1.0):
         )
     finally:
         dataset.close()
+        gc.collect()
 
 
 def open_icon_coord_field(path, variable_name):
