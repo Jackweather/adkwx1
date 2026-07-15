@@ -112,6 +112,10 @@ def find_latest_gfs_run():
     raise RuntimeError("Unable to locate a recent GFS run on NOMADS.")
 
 
+def log_optional_model_failure(step_str, model_name, error):
+    log_error(step_str, f"{model_name} unavailable for this hour; continuing with remaining models", error)
+
+
 def build_gfs_url(run_date, run_hour, step_str, variable_query):
     query = (
         f"file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
