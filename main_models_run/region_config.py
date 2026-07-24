@@ -15,11 +15,12 @@ REGION_SPECS = OrderedDict(
         ("rockies", {"label": "Rockies", "extent": (-116, -101, 35, 49)}),
         ("southwest", {"label": "Southwest", "extent": (-125, -108, 31, 42)}),
         ("northwest", {"label": "Northwest", "extent": (-126, -110, 41, 50)}),
+        ("central_pacific", {"label": "Central Pacific", "extent": (-160, -120, -10, 30)}),
     ]
 )
 
 DEFAULT_REGION = "conus"
-DEFAULT_ACTIVE_REGIONS = ("conus", "northeast", "southeast", "midwest")
+DEFAULT_ACTIVE_REGIONS = ("conus", "northeast", "southeast", "midwest", "central_pacific")
 REGION_ENV_VAR = "ADKWX_REGIONS"
 
 
