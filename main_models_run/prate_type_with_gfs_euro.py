@@ -37,7 +37,41 @@ LOCAL_TZ = ZoneInfo("America/New_York")
 GFS_FILTER_URL = "https://nomads.ncep.noaa.gov/cgi-bin/filter_gfs_0p25.pl"
 ICON_BASE_URL = "https://opendata.dwd.de/weather/nwp/icon/grib"
 GDPS_BASE_URL = "https://dd.weather.gc.ca"
-PLOT_EXTENT = CONUS_EXTENT
+# Degrees to expand the plot extent longitudinally (left/right)
+EXPAND_PACIFIC_DEGREES = 20.0
+# Compute plot extent as the bounding box covering all active regions to
+# avoid remapping artifacts when regions span the dateline or are far apart
+# (e.g., Central Pacific + CONUS). Format: (lon_min, lon_max, lat_min, lat_max)
+def _compute_plot_extent():
+    lon_mins = []
+    lon_maxs = []
+    lat_mins = []
+    lat_maxs = []
+    for region in ACTIVE_REGION_NAMES:
+        lon_min, lon_max, lat_min, lat_max = get_region_extent(region)
+        lon_mins.append(lon_min)
+        lon_maxs.append(lon_max)
+        lat_mins.append(lat_min)
+        lat_maxs.append(lat_max)
+
+    lon_min = min(lon_mins)
+    lon_max = max(lon_maxs)
+    lat_min = min(lat_mins)
+    lat_max = max(lat_maxs)
+
+    # Expand longitudinal extent to give extra Pacific buffer
+    try:
+        expand = float(EXPAND_PACIFIC_DEGREES)
+    except NameError:
+        expand = 0.0
+
+    lon_min -= expand
+    lon_max += expand
+
+    return (lon_min, lon_max, lat_min, lat_max)
+
+
+PLOT_EXTENT = _compute_plot_extent()
 ICON_MARGIN_DEGREES = 3.0
 
 PRATE_LEVELS = [0.1, 0.25, 0.5, 0.75, 1.5, 2, 2.5, 3, 4, 6, 10, 16, 24]
@@ -153,11 +187,19 @@ def find_latest_gfs_run():
 
 
 def build_gfs_url(run_date, run_hour, step_str, variable_query):
+    # Use the global plot extent so downloads cover all active regions
+    lon_min, lon_max, lat_min, lat_max = PLOT_EXTENT
+    # GFS filter expects longitudes 0..360 — convert if negative
+    leftlon = int(lon_min if lon_min >= 0 else lon_min + 360)
+    rightlon = int(lon_max if lon_max >= 0 else lon_max + 360)
+    toplat = int(lat_max)
+    bottomlat = int(lat_min)
+
     query = (
         f"file=gfs.t{run_hour}z.pgrb2.0p25.f{step_str}"
         f"&{variable_query}"
         "&subregion="
-        "&leftlon=220&rightlon=300&toplat=55&bottomlat=20"
+        f"&leftlon={leftlon}&rightlon={rightlon}&toplat={toplat}&bottomlat={bottomlat}"
         f"&dir={quote(f'/gfs.{run_date}/{run_hour}/atmos')}"
     )
     return f"{GFS_FILTER_URL}?{query}"
@@ -411,12 +453,21 @@ def open_icon_scalar_field(path, variable_name, scale=1.0):
 
 def build_icon_indexer(icon_lats, icon_lons, gfs_field):
     lon_min, lon_max, lat_min, lat_max = PLOT_EXTENT
-    region_mask = (
-        (icon_lats >= lat_min - ICON_MARGIN_DEGREES)
-        & (icon_lats <= lat_max + ICON_MARGIN_DEGREES)
-        & (icon_lons >= lon_min - ICON_MARGIN_DEGREES)
-        & (icon_lons <= lon_max + ICON_MARGIN_DEGREES)
-    )
+    # Normalize ICON longitudes to -180..180 to match region extents
+    icon_lons = normalize_longitudes(icon_lons)
+
+    lat_mask = (icon_lats >= lat_min - ICON_MARGIN_DEGREES) & (icon_lats <= lat_max + ICON_MARGIN_DEGREES)
+
+    # Handle longitude ranges that cross the dateline (e.g., lon_min > lon_max)
+    lon_min_adj = lon_min - ICON_MARGIN_DEGREES
+    lon_max_adj = lon_max + ICON_MARGIN_DEGREES
+    if lon_min_adj <= lon_max_adj:
+        lon_mask = (icon_lons >= lon_min_adj) & (icon_lons <= lon_max_adj)
+    else:
+        # Example: lon_min=170, lon_max=-150 -> include lon >= 170 OR lon <= -150
+        lon_mask = (icon_lons >= lon_min_adj) | (icon_lons <= lon_max_adj)
+
+    region_mask = lat_mask & lon_mask
 
     selected_indices = np.flatnonzero(region_mask)
     source_points = np.column_stack((icon_lats[selected_indices], icon_lons[selected_indices]))
@@ -561,6 +612,16 @@ def plot_average_fields(avg_prate, avg_mslp, avg_snow_mask, available_runs, fore
 
     for region_name in ACTIVE_REGION_NAMES:
         region_extent = get_region_extent(region_name)
+        # Only expand the Central Pacific region's plotting extent — leave others unchanged
+        if region_name == "central_pacific":
+            try:
+                expand_deg = float(EXPAND_PACIFIC_DEGREES)
+            except NameError:
+                expand_deg = 0.0
+            lon_min_r, lon_max_r, lat_min_r, lat_max_r = region_extent
+            lon_min_r -= expand_deg
+            lon_max_r += expand_deg
+            region_extent = (lon_min_r, lon_max_r, lat_min_r, lat_max_r)
 
         fig = plt.figure(figsize=(10, 7), dpi=300, facecolor="white")
         ax = fig.add_axes([0.06, 0.18, 0.88, 0.68], projection=ccrs.PlateCarree())
